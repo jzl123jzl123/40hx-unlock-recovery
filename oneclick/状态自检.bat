@@ -42,6 +42,7 @@ set "TASKV="
 set "TMPT=%TEMP%\40hx_task.stat"
 set "TMPCL=%TEMP%\40hx_check.lst"
 set "TMPG=%TEMP%\40hx_gsp.txt"
+set "TMPV=%TEMP%\40hx_vbios_v.txt"
 set "TMPG2=%TEMP%\40hx_gsp_v.txt"
 set "TMPG3=%TEMP%\40hx_c43.txt"
 set "TMPW=%TEMP%\40hx_width.txt"
@@ -122,6 +123,20 @@ set "OK4=2"
 goto :gen2info
 :gsp_ok
 echo.
+rem 2026-10-11 新增：VBIOS 批次判别（Prod/Debug 签名链，三卡 VBIOS 对比实证：Prod 链拒签 EFI 注入 → 算力解不开）
+rem   只读上面已落盘的 nvidia-smi -q 结果（%TMPG%），零硬件触碰、不计入结论项
+set "VBV="
+if exist "%TMPV%" del "%TMPV%" >nul 2>&1
+if exist "%TMPG%" powershell -NoProfile -Command "$q=[IO.File]::ReadAllText('%TMPG%');$m=[regex]::Match($q,'(?im)^\s*VBIOS Version\s*:\s*(\S+?)\s*$');if($m.Success){$m.Groups[1].Value}else{''}" > "%TMPV%" 2>nul
+if exist "%TMPV%" for /f "usebackq delims=" %%a in ("%TMPV%") do set "VBV=%%a"
+set "VBK=0"
+if "%VBV%"=="90.06.67.00.04" set "VBK=1"
+if "%VBV%"=="90.06.67.00.06" set "VBK=2"
+if "%VBK%"=="1" echo     [OK] VBIOS 批次 : %VBV% = Debug 签名链（算力+Gen2 都在可解范围）
+if "%VBK%"=="2" echo     [!!] VBIOS 批次 : %VBV% = 已知 Prod 签名链变体（固件拒签 EFI 注入，算力 2 例实证无解；.06 有多个变体，以安装器批次预检为准）
+if "%VBK%"=="2" echo            要算力需先刷 Debug 版 VBIOS（高风险，需专用刷机包）-- 找包作者；只要 Gen2 可忽略本条
+if not defined VBV echo     [--] VBIOS 批次 : 没能判定（nvidia-smi -q 没有 VBIOS 行?）-- 不影响下面的实测
+if defined VBV if "%VBK%"=="0" echo     [--] VBIOS 批次 : %VBV% = 未收录版本，以实测为准
 
 echo [2/6] 驱动模式   (WDDM = WSL 直通可用)
 echo     当前 : %DMC%     待生效 : %DMP%
