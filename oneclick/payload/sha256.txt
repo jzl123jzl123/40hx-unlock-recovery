@@ -4,7 +4,7 @@ aedc410f05ed43e5833543a0dc849242  590868  EFI/40HXUNLK.EFI
 988ad312105384fd7997718b4157b556  19904  drivers/WinRing0x64.sys.b64
 8598c45c61f04e9ce2145628adcfe28b  134522  drivers/inpoutx64.dll.b64
 59f7f4409873dae9abb7eba851d958bc  20540  drivers/inpoutx64.sys.b64
-25cfbeb8d81fbd6df111b585e79bb683  76962  windows/40hx-retrain-inpout.ps1
+a57550bb90f5a4b82d7367505e8468f6  78995  windows/40hx-retrain-inpout.ps1
 dd38d4d86ea1326e8c01266c4de2ab6c  19984  windows/ACE-Toggle.ps1
 be36ce1b2868b23021a7071090c8fac3  26037  windows/RunPostBind.cmd
 6e3f7dbd75d2e59fd824c195b7278477  735  windows/Status.cmd

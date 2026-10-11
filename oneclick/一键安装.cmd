@@ -36,6 +36,7 @@ rem 196608 without the minus is what customers usually report (the minus gets lo
 rem   cmd formats %ERRORLEVEL% as signed, so a real 196608 would be another failure;
 rem   we still show the same explanation because the customer-side steps are identical.
 if "%RC%"=="196608"  goto nops1
+if "%RC%"=="6" goto userquit
 if not "%RC%"=="0" goto runfail
 echo.
 echo ============================================================
@@ -45,6 +46,14 @@ echo   做法：开始菜单-关机，最好拔电 10 秒再开机
 echo   开机后双击 状态自检.bat 看结论；出问题看 排查指引.md
 echo   上面若列了"重启前请先处理"的事项，请先处理再重启
 echo   回滚见 文档\使用说明-详细.md （或根目录 README.md）
+echo ============================================================
+echo.
+goto runend
+:userquit
+echo.
+echo ============================================================
+echo   已按你的选择退出（批次预检：锁死批次）—— 没有安装 EFI/启动项/开机任务，
+echo   开机时不会有任何本包动作，机器保持原样可用。详见上方说明。
 echo ============================================================
 echo.
 goto runend
