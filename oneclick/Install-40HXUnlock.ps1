@@ -65,6 +65,7 @@ param(
   [string]$BootMode = 'default',
 
   [switch]$Force,        # 忽略前提硬门槛（Secure Boot / MBR / BitLocker）
+  [switch]$ForceLockedBatch,  # 批次预检判为锁死批次时仍强制安装（含 EFI 启动项；43 风险与自救已告知）
   [switch]$RunNow,       # Install/Repair 结束后立刻跑一次开机任务（要求本次开机已解锁）
   [switch]$Yes,          # Uninstall 确认
   [switch]$KeepBootx64,  # 不覆盖 ESP 的 \EFI\Boot\bootx64.efi（只写 \EFI\40HX\40HXUNLK.EFI）
@@ -163,6 +164,7 @@ function Get-ExitCodeText {
     3 { return '载荷损坏或被改动（固件/驱动/helper 的 sha256 对不上）—— 杀软删过文件 = 重新解压一份包' }
     4 { return '固件变量(NVRAM)读写失败（权限 / 主板不接受 / 槽位不够）' }
     5 { return '驱动或服务失败' }
+    6 { return '用户选择不安装（批次预检判为锁死批次；EFI/启动项/开机任务均未安装，属主动退出非失败）' }
     default { return '未分类错误' }
   }
 }
@@ -185,7 +187,8 @@ function Show-FailureHelp {
 
 function Exit-With {
   param([int]$Code)
-  if ($Code -ne 0) { Show-FailureHelp $Code }
+  # 2026-10-11：退出码 6 = 用户在批次预检后主动选择不安装 —— 不是失败，不打印"出错怎么办"段
+  if ($Code -ne 0 -and $Code -ne 6) { Show-FailureHelp $Code }
   exit $Code
 }
 
@@ -238,6 +241,24 @@ function Get-AuthoritativeDisplayKeyIndex {
 # ---- 显示类注册表子键：GSP 开关真正生效的位置 --------------------------------
 # Windows 上开 GSP 写在 HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}\<000X>
 # （本机实测：Services\nvlddmkm\Parameters 里没有 EnableGpuFirmware，写了也不生效）
+# ---- 批次预检（2026-10-11）------------------------------------------------------
+# 调 Gen2 工具的 -BatchCheck（只读寄存器），按 POST 初态 SS0 形态判批次：
+#   unlockable=可解锁批次（含本次已解锁） / locked=已知锁死批次（算力+Gen2 均不可解） / unknown=没见过或读不到
+# 传 -RawOutput 字符串 = 离线判定（单测用），不跑工具。
+function Get-BatchVerdict {
+  param([string]$RawOutput)
+  $rc = $null; $raw = $RawOutput
+  # 坑：[string] 参数不传时拿到的是 '' 不是 $null（Get-GspState 同款约定：用真值判断，别用 $null -eq）
+  if (-not $raw) {
+    $tool = Join-Path $script:ProgDataWin '40hx-retrain-inpout.ps1'
+    if (-not (Test-Path -LiteralPath $tool)) { return @{ Verdict='unknown'; Rc=-1; Raw=('gen2 tool missing: ' + $tool) } }
+    $raw = Invoke-Native { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool -BatchCheck 2>&1 | Out-String }
+    $rc = $LASTEXITCODE
+  }
+  $v = 'unknown'
+  if ($raw -match 'BATCH_VERDICT=([A-Za-z]+)') { if ($Matches[1].ToLower() -in @('unlockable','locked','unknown')) { $v = $Matches[1].ToLower() } }
+  return @{ Verdict=$v; Rc=$rc; Raw=$raw }
+}
 function Get-DisplayClassSubKeys {
   $cls = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
   $out = @()
@@ -2913,6 +2934,36 @@ Install-Hardening
 Install-Gsp
 Install-Power
 if ($Mode -eq 'Install') {
+  # 2026-10-11：批次预检（只读）。认出锁死批次 → 明确提示 + 客户选择；强制安装连 EFI 一起装，但告知 43 风险与自救办法
+  $bv = Get-BatchVerdict
+  if ($bv.Verdict -eq 'unlockable') {
+    Info '批次预检：可解锁批次（含本次开机已解锁）'
+  } elseif ($bv.Verdict -eq 'unknown') {
+    Warn '批次预检：没见过的批次形态（可能解锁失败）—— 按原流程继续安装；失败可 -Mode Uninstall -Yes 还原'
+  } else {
+    Head '批次预检：已知锁死批次'
+    Say '  这张卡的批次（POST 寄存器形态 SS0=0x20000010）实测：算力解不了，Gen2 目前也解不了。' 'Red'
+    Say '  装上后每次开机都会跑一遍解锁固件并失败，失败过程可能把卡留在异常状态，' 'Yellow'
+    Say '  Windows 里表现为 设备管理器代码43（显卡叹号 / 开机黑屏一阵）。' 'Yellow'
+    Say ''
+    Say '  [1] 退出不装（推荐）—— 不动 EFI/启动项/开机任务，卡保持原样可用' 'Green'
+    Say '  [2] 强制安装（含 EFI 启动项）—— 适合：准备刷 VBIOS 试救 / 就想试试' 'Yellow'
+    Say '      强制安装后如果开机（40HX 跑码）出现代码43，两种自救：' 'Yellow'
+    Say '        a) 跑 一键卸载.cmd 还原；或' 'Yellow'
+    Say '        b) 进 BIOS 把 Windows Boot Manager 调回第一启动项（40HX 项不跑就没有43），' 'Yellow'
+    Say '           Windows 侧的 Gen2 解锁工具照常工作（只解 Gen2，不解算力）。' 'Yellow'
+    $choice = ''
+    if ($ForceLockedBatch) { $choice = '2'; Info '（-ForceLockedBatch：按强制安装处理）' }
+    else { $choice = Read-Host '  选择 [1/2]（直接回车 = 1 退出）' }
+    if ($choice -ne '2') {
+      Say '  已按选择退出：未安装 EFI 固件/启动项/开机任务，开机时不会有任何本包动作。' 'Green'
+      Dismount-Esp
+      Info '  （GSP 开关与快速启动两项已按标准流程调整，无害且可随卸载还原；ESP 的 \EFI\40HX\drv 与已拷贝驱动文件都是不会被加载的静态文件，想彻底清理：-Mode Uninstall -Yes）'
+      Exit-With 6
+    }
+    Warn '按客户选择强制安装（锁死批次，43 风险与自救已告知）'
+    Add-Action '本机是锁死批次：若开机（40HX 跑码）出现代码43 → 跑 一键卸载.cmd，或进 BIOS 把 Windows Boot Manager 调回第一启动项（40HX 项不跑就没有43，Windows 侧 Gen2 工具照常工作）'
+  }
   Install-Efi -BackupDir $bk
   Install-BootEntry -BackupDir $bk -BootMode $BootMode
 } else { Info 'Repair 模式：跳过 ESP 固件与固件启动项' }

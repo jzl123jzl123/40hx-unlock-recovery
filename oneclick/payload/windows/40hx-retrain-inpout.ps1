@@ -1,7 +1,8 @@
-﻿param([switch]$Apply, [string]$GpuBdf = '', [string]$RootBdf = '', [switch]$NoAutoPrime, [switch]$AllowPrime, [string]$PciBackend = 'auto')
+﻿param([switch]$Apply, [string]$GpuBdf = '', [string]$RootBdf = '', [switch]$NoAutoPrime, [switch]$AllowPrime, [string]$PciBackend = 'auto', [switch]$BatchCheck)
 # 40HX Gen2 retrain via inpoutx64 (MMIO) + WinRing0 (PCI config).  The anti-cheat is NEVER touched.
 # exit codes: 0 = PASS (physical Gen2 x16), 10 = link not Gen2, 11 = baseline/guard failed,
 #             12 = GPU/driver not ready in time, 13 = inpoutx64 driver not running, 3 = WinRing0 unusable
+# 2026-10-11: -BatchCheck = 批次预检（安装器用；只读寄存器，不训练不写），exit: 0=unlockable 20=locked 21=unknown/读失败
 # 2026-09-30: GPU/root-port BDF are AUTO-DETECTED (PnP LocationInfo -> nvidia-smi -> legacy 01:00.0).
 #             The old build hardcoded 01:00.0 / 00:01.0, so on any machine where the card sits elsewhere
 #             (2nd slot, behind a switch, AGESA/high-bus boards - vendor README reports bus 0x10)
@@ -775,7 +776,11 @@ $LC0_OFF=0x8C040; $LC0_BASE=U32 '80085800'
 #   目标值仍然是厂商 EFI 写入的已知良好值 0x80085800（写回时把那两个位置归一化），
 #   其它任何位不符仍然拒写。写之前会把原值落盘（可回滚）。
 $LC0_BASE_MASK=U32 'FFABFFFF'
-$PM1_OFF=0x8841C; $PM1_BASE_MASK=U32 'FFFFD7FF'; $PM1_BASE=U32 'E0B40500'   # mask 清掉 bit13(Gen2 位) 与 bit11(VBIOS 批次跳线位) 后再比
+# 2026-10-11（热补，客户机 技嘉 Z790M AORUS ELITE + VBIOS 90.06.67.00.06）：
+#   该批次实测 PRIV_MISC_1 = 0xE0B46500（族基准之外多 bit13(本就是 Gen2 位) + bit14），
+#   bit14 判定为又一批次的跳线位 → 掩码再忽略 bit14（FFFFD7FF -> FFFF97FF）。
+#   写回逻辑不变：只置 bit13；bit14 与 bit11 一样**原样保留**；其它位不符仍然拒写。
+$PM1_OFF=0x8841C; $PM1_BASE_MASK=U32 'FFFF97FF'; $PM1_BASE=U32 'E0B40500'   # mask 清掉 bit13(Gen2 位)、bit11 与 bit14(批次跳线位) 后再比
 function DecideTargets([uint32]$l,[uint32]$p){
   $r=@{ Ok=$false; Lc0=$l; Pm1=$p; Lc0Change=$false; Pm1Change=$false; Reason='' }
   if((($l -band $LC0_BASE_MASK)) -ne $LC0_BASE){ $r.Reason = 'LINK_CONFIG_0 baseline not in known family: 0x' + $l.ToString('X8'); return $r }
@@ -810,8 +815,27 @@ $pm1=MmioRead ([uint64]($bar+$PM1_OFF))
 $ss0=MmioRead ([uint64]($bar+0x409664))
 W("  BOOT0         = " + $(if($boot0 -eq $null){'READ FAILED'}else{'0x'+$boot0.ToString('X8')}))
 W("  LINK_CONFIG_0 = " + $(if($lc0 -eq $null){'READ FAILED'}else{'0x'+$lc0.ToString('X8')}) + "   (Gen2位=bit18: 1=Gen1态/0=Gen2态; 族基准 0x80085800; bit20/bit22=批次跳线位,写回时归一化)")
-W("  PRIV_MISC_1   = " + $(if($pm1 -eq $null){'READ FAILED'}else{'0x'+$pm1.ToString('X8')}) + "   (Gen2位=bit13: 1=Gen2态; bit11=VBIOS批次跳线位,原样保留; 族基准 0xE0B40500)")
+W("  PRIV_MISC_1   = " + $(if($pm1 -eq $null){'READ FAILED'}else{'0x'+$pm1.ToString('X8')}) + "   (Gen2位=bit13: 1=Gen2态; bit11/bit14=批次跳线位,原样保留; 族基准 0xE0B40500)")
 W("  SS0           = " + $(if($ss0 -eq $null){'READ FAILED'}else{'0x'+$ss0.ToString('X8')}) + "   (0x88888888 = compute unlocked)")
+
+# ---- 2026-10-11: 批次预检（安装器调用；只读，不写任何寄存器、不训练、不动驱动状态）----
+# 判定只看 POST 初态 SS0 形态（0x02020004=已知可解锁 / 0x20000010=已知锁死 / 0x88888888=本次已解锁），
+# 不做写入探测 —— 写入回读不能区分批次（可解锁的 .04 卡探测写同样不生效，解锁靠 booter）。
+if($BatchCheck){
+  $fmt={param($v) if($v -eq $null){'READ_FAILED'}else{'0x'+$v.ToString('X8')}}
+  $ss1v=MmioRead ([uint64]($bar+0x40966C)); $plmv=MmioRead ([uint64]($bar+0x409650))
+  $plrv=MmioRead ([uint64]($bar+0x8C1C0)); $glv=PciRead $GPU ([uint32]($gcap+0x0C)) 4
+  # 判定用十六进制字符串比较：$ss0 若是带符号 Int32，0x88888888 会变成负数，数值 -eq 直接误判（本工具 2026-10-11 实测踩到）
+  $bc='unknown'
+  $h0 = (& $fmt $ss0)
+  if($h0 -eq '0x88888888'){ $bc='unlockable' }
+  elseif($h0 -eq '0x02020004'){ $bc='unlockable' }
+  elseif($h0 -eq '0x20000010'){ $bc='locked' }
+  W("  BATCH_SS0=" + (& $fmt $ss0) + " BATCH_SS1=" + (& $fmt $ss1v) + " BATCH_PLM=" + (& $fmt $plmv) + " BATCH_LC0=" + (& $fmt $lc0) + " BATCH_PM1=" + (& $fmt $pm1) + " BATCH_PLR=" + (& $fmt $plrv) + " BATCH_LNKCAP=" + $(if($glv -eq $null){'READ_FAILED'}else{'0x'+([uint32]$glv).ToString('X8')}))
+  W("  BATCH_VERDICT=" + $bc)
+  CleanupDrivers
+  if($bc -eq 'unlockable'){ exit 0 } elseif($bc -eq 'locked'){ exit 20 } else { exit 21 }
+}
 # ---- 2026-09-30（客户机 VBIOS .06）新增：与 OnlyEFI 官方 Windows helper 的 read_guard() 逐项对齐的**只读体检** ----
 # 官方源码（source/windows/CMP40HXGen2_prod.c）要求以下每一项都成立才肯继续：
 #   BOOT0=166000A1 / XVE_OVR=6 / CYA_0=068731B3 / PL_LINK_RATE=00220036 / VSEC_DEVICE=801
