@@ -1,4 +1,7 @@
 ﻿#Requires -Version 5.1
+# Copyright (c) 2026 nie2100 —— 本文件属本仓库自写部分，保留所有权利（未经许可不得再分发 / 二次打包 / 转卖）。
+# 部分内容源自 CMP40HX-Unlock（GitHub: PZH1gdmu）与 CMP40HX-Unlock-OnlyEFI（GitHub: BardKing-CN），那部分为 MIT。
+# 完整授权与来源见 LICENSE / THIRD_PARTY.md。
 <#
   Install-40HXUnlock.ps1
   ======================
@@ -10,11 +13,11 @@
     2. 驱动：ThrottleStop.sys + WinRing0x64.sys + inpoutx64.sys/.dll（base64 还原）→ System32\drivers + 多个自愈源
              + 建服务 ThrottleStop / WinRing0_1_2_0
              （inpoutx64 不建常驻服务：开机脚本自己 create/delete 临时服务 inpoutx64T）
-    3. Windows 侧 helper：CMP40HXGen2.exe + AutoRetrain.cmd + RunPostBind.cmd + 40hx-retrain-inpout.ps1 + ACE-Toggle.ps1
-             → %ProgramData%\CMP40HXGen2\windows
-             首选路径 = 40hx-retrain-inpout.ps1：inpoutx64 直写 MMIO + WinRing0 走 PCI 配置空间，
-             **ACE-BOOT 全程不用停** → 反作弊预启动模式不被破坏，游戏不要求重启；
-             旧路径（停 ACE-BOOT → AutoRetrain → 恢复 ACE-BOOT）保留为 fallback：新路径退出码非 0 才走
+    3. Windows 侧 helper：RunPostBind.cmd + 40hx-retrain-inpout.ps1 + ACE-Toggle.ps1（仅供治愈段用）→ %ProgramData%\CMP40HXGen2\windows
+             唯一重训路径 = 40hx-retrain-inpout.ps1：inpoutx64 直写 MMIO + WinRing0 走 PCI 配置空间，
+             **ACE-BOOT 全程不用停** → 反作弊预启动模式不被破坏，游戏不要求重启。
+             2026-10-10（用户要求）：移除"停 ACE-BOOT → AutoRetrain → 恢复 ACE-BOOT"降级链，
+             CMP40HXGen2.exe / AutoRetrain.cmd 不再部署（装机时会清掉老版本留下的这两个文件）
     4. ESP 固件：OnlyEFI v0.1.1 的 40HXUNLK.EFI（算力解锁 + Gen2 primer，EFI 阶段不重训）
              → \EFI\40HX\40HXUNLK.EFI（默认**不动** Windows 自己的 \EFI\Boot\bootx64.efi；只有显式加 -WriteBootx64 才覆盖）
     5. 固件启动项：自己写 NVRAM Boot#### 变量（"40HX Unlock"，指向解锁 EFI），
@@ -31,8 +34,17 @@
     · ESP 挂载点会与系统盘 ESP 分区比对（防止挂到别的磁盘的 ESP → 固件找不到文件）。
     · 取消"必须重启"的说法：改成必须**完全关机（不是重启）**再开机，否则残留状态会变成 Code 43。
 
+  2026-10-08 修复（客户机 Install 被「系统盘不是 GPT（未知）」挡死）：
+    · Storage 模块/提供程序异常时 Get-Partition/Get-Disk 会抛异常，旧版把它吞成 '未知' 并当成 MBR 盘
+      挡下整个安装（客户机 diskpart 里三块盘全是 GPT）。现在样式判定改为 5 个后端：
+      Storage 模块 → CIM(Storage 命名空间) → 老 WMI → 裸读 LBA0/LBA1 → 裸读扫描+卷GUID反查；
+      原始错误文本全部写进日志；只有真读出 MBR 才是硬门槛，'未知' 降级为提示 + 诊断。
+    · ESP 分区身份同样带回退（Get-Partition 拿不到 → CIM → 裸读 GPT 解析出 ESP 类型分区）。
+    · 新增 -Mode StorageDiag 与 工具-测试与修复\存储体检.cmd：一次把每个后端的原始结果打全，方便客户回传。
+
   模式（-Mode）：
     Check       只体检，不写任何东西（可非管理员运行，仅少 ESP/NVRAM 部分）
+    StorageDiag 存储信息诊断：逐后端打印「系统盘样式/系统盘号/ESP 分区/逐盘裸读」的原始结果（只读，可非管理员）
     SelfTest    自检：ESP 读写往返 + NVRAM 写入/回读/删除往返 + BootOrder 原样写回（不改动状态）
     Install     一键安装/修复（幂等，可重复跑）
     Repair      只补文件/服务/任务（不动 NVRAM）
@@ -44,7 +56,7 @@
 #>
 [CmdletBinding()]
 param(
-  [ValidateSet('Check','Install','Repair','Verify','SelfTest','MakeDefault','Uninstall')]
+  [ValidateSet('Check','Install','Repair','Verify','SelfTest','MakeDefault','Uninstall','StorageDiag')]
   [string]$Mode = 'Check',
 
   # 固件启动项怎么处理：default=放进 BootOrder 第一位（推荐，配合 chainload 安全）
@@ -53,6 +65,7 @@ param(
   [string]$BootMode = 'default',
 
   [switch]$Force,        # 忽略前提硬门槛（Secure Boot / MBR / BitLocker）
+  [switch]$ForceLockedBatch,  # 批次预检判为锁死批次时仍强制安装（含 EFI 启动项；43 风险与自救已告知）
   [switch]$RunNow,       # Install/Repair 结束后立刻跑一次开机任务（要求本次开机已解锁）
   [switch]$Yes,          # Uninstall 确认
   [switch]$KeepBootx64,  # 不覆盖 ESP 的 \EFI\Boot\bootx64.efi（只写 \EFI\40HX\40HXUNLK.EFI）
@@ -96,6 +109,7 @@ $script:TaskName = 'CMP40HX Gen2 PostBind'
 #   而失败 —— 但登录后手动跑一次总是成功。所以让系统自己在登录后自动补跑一次，用户就不用手动了。
 $script:TaskNameLogon = 'CMP40HX Gen2 PostBind Logon'
 $script:EspRoot = $null
+$script:EspRootUsed = $null   # 2026-10-10（审查低-6）：Dismount 前快照，供状态文件记录
 $script:LogPath = $null
 $script:WarnCount = 0
 $script:FailCount = 0
@@ -150,6 +164,7 @@ function Get-ExitCodeText {
     3 { return '载荷损坏或被改动（固件/驱动/helper 的 sha256 对不上）—— 杀软删过文件 = 重新解压一份包' }
     4 { return '固件变量(NVRAM)读写失败（权限 / 主板不接受 / 槽位不够）' }
     5 { return '驱动或服务失败' }
+    6 { return '用户选择不安装（批次预检判为锁死批次；EFI/启动项/开机任务均未安装，属主动退出非失败）' }
     default { return '未分类错误' }
   }
 }
@@ -172,7 +187,8 @@ function Show-FailureHelp {
 
 function Exit-With {
   param([int]$Code)
-  if ($Code -ne 0) { Show-FailureHelp $Code }
+  # 2026-10-11：退出码 6 = 用户在批次预检后主动选择不安装 —— 不是失败，不打印"出错怎么办"段
+  if ($Code -ne 0 -and $Code -ne 6) { Show-FailureHelp $Code }
   exit $Code
 }
 
@@ -225,6 +241,24 @@ function Get-AuthoritativeDisplayKeyIndex {
 # ---- 显示类注册表子键：GSP 开关真正生效的位置 --------------------------------
 # Windows 上开 GSP 写在 HKLM\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-...}\<000X>
 # （本机实测：Services\nvlddmkm\Parameters 里没有 EnableGpuFirmware，写了也不生效）
+# ---- 批次预检（2026-10-11）------------------------------------------------------
+# 调 Gen2 工具的 -BatchCheck（只读寄存器），按 POST 初态 SS0 形态判批次：
+#   unlockable=可解锁批次（含本次已解锁） / locked=已知锁死批次（算力+Gen2 均不可解） / unknown=没见过或读不到
+# 传 -RawOutput 字符串 = 离线判定（单测用），不跑工具。
+function Get-BatchVerdict {
+  param([string]$RawOutput)
+  $rc = $null; $raw = $RawOutput
+  # 坑：[string] 参数不传时拿到的是 '' 不是 $null（Get-GspState 同款约定：用真值判断，别用 $null -eq）
+  if (-not $raw) {
+    $tool = Join-Path $script:ProgDataWin '40hx-retrain-inpout.ps1'
+    if (-not (Test-Path -LiteralPath $tool)) { return @{ Verdict='unknown'; Rc=-1; Raw=('gen2 tool missing: ' + $tool) } }
+    $raw = Invoke-Native { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $tool -BatchCheck 2>&1 | Out-String }
+    $rc = $LASTEXITCODE
+  }
+  $v = 'unknown'
+  if ($raw -match 'BATCH_VERDICT=([A-Za-z]+)') { if ($Matches[1].ToLower() -in @('unlockable','locked','unknown')) { $v = $Matches[1].ToLower() } }
+  return @{ Verdict=$v; Rc=$rc; Raw=$raw }
+}
 function Get-DisplayClassSubKeys {
   $cls = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
   $out = @()
@@ -489,6 +523,8 @@ public class FwVar {
     if (!LookupPrivilegeValue(null, "SeSystemEnvironmentPrivilege", out luid)) { return "LookupPrivilegeValue 失败 " + Marshal.GetLastWin32Error(); }
     TP tp = new TP(); tp.Count = 1; tp.Luid = luid; tp.Attributes = 0x2;
     if (!AdjustTokenPrivileges(tok, false, ref tp, 0, IntPtr.Zero, IntPtr.Zero)) { return "AdjustTokenPrivileges 失败 " + Marshal.GetLastWin32Error(); }
+    // 2026-10-10（审查中-3）：返回 TRUE 也可能没拿到特权，必须判 ERROR_NOT_ALL_ASSIGNED(1300)，否则报错点错位到写 NVRAM 才炸 1314
+    if (Marshal.GetLastWin32Error() == 1300) { return "AdjustTokenPrivileges 未授予 SeSystemEnvironmentPrivilege (ERROR_NOT_ALL_ASSIGNED 1300)"; }
     return "ok";
   }
 }
@@ -506,6 +542,12 @@ function Read-FwVar {
   $buf = New-Object byte[] 8192
   $len = [FwVar]::GetFirmwareEnvironmentVariableW($Name, $script:FwGuid, $buf, [uint32]$buf.Length)
   if ($len -le 0) { return $null }
+  # 2026-10-10（审查低-7）：防御 —— 变量比缓冲大时按返回值扩容重读一次，杜绝越界复制
+  if ($len -gt $buf.Length) {
+    $buf = New-Object byte[] ([int]$len)
+    $len = [FwVar]::GetFirmwareEnvironmentVariableW($Name, $script:FwGuid, $buf, [uint32]$buf.Length)
+    if ($len -le 0 -or $len -gt $buf.Length) { return $null }
+  }
   $out = New-Object byte[] ([int]$len)
   [Array]::Copy($buf, $out, $len)
   return $out
@@ -634,14 +676,29 @@ function Get-EspPartitionInfo {
   $espType = '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
   $cands = @()
   try { $cands = @(Get-Partition -ErrorAction Stop | Where-Object { ([string]$_.GptType).ToLower() -eq $espType }) } catch { $cands = @() }
-  if ($cands.Count -eq 0) { return $null }
+  if ($cands.Count -eq 0) {
+    # 2026-10-08：Storage 模块/命名空间读不到分区时（客户机实测），改用 CIM → 裸读 GPT 兜底；
+    #   否则这里返回 $null，后面会退化成“抄现有启动项的节点”（可能指到过期分区 → 开机干等一段再进系统）。
+    $fb = Get-EspPartitionFallback -EspType $espType
+    if (-not $fb) { return $null }
+    Info ('ESP 分区来源: ' + $fb.Source + '（Get-Partition 读不到候选，走了兜底）')
+    return $fb
+  }
   $sysDisk = $null
   try { $sysDisk = (Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':'))).DiskNumber } catch { }
   $sameDisk = @($cands | Where-Object { $_.DiskNumber -eq $sysDisk })
   $pick = $null
   if ($sameDisk.Count -eq 1) { $pick = $sameDisk[0] }
   elseif ($sameDisk.Count -gt 1) { $pick = $sameDisk | Sort-Object PartitionNumber | Select-Object -First 1 }
-  else { $pick = $cands | Select-Object -First 1 }
+  else {
+    # 2026-10-10（审查 B2）：系统盘号读不到时不能跨盘瞎挑 —— 全盘唯一 ESP 才敢用；多个就拒判
+    #   （指错盘 = 启动项找不到固件文件 = 静默不解锁；上层会改用现有参考项的节点 + 告警）
+    if ($cands.Count -eq 1) { $pick = $cands[0] }
+    else {
+      Warn ('系统盘号读不到，而机器上有 ' + $cands.Count + ' 个 ESP 分区 —— 不敢随便挑。启动项将沿用现有参考项的设备路径（或用 BIOS 手动选）')
+      return $null
+    }
+  }
   return [pscustomobject]@{
     DiskNumber      = $pick.DiskNumber
     PartitionNumber = $pick.PartitionNumber
@@ -757,17 +814,440 @@ function Write-BootOrderIndices {
 
 function Format-BootOrderIndices { param([int[]]$Indices) return (($Indices | ForEach-Object { '{0:X4}' -f $_ }) -join ',') }
 
+# ================================================================ 存储信息：多后端探测（2026-10-08）
+# 现场问题（客户机 Windows 11 26100）：Install 报「系统盘不是 GPT（未知）」，而 diskpart 里磁盘 0/1/2
+#   全是 GPT —— 说明是**判定失败**：Get-Partition/Get-Disk 抛异常被 catch 吞成 '未知'，看着像 MBR 盘，
+#   然后被当硬门槛挡住整台机器（装机版/精简版 Windows、Storage 提供程序异常、WMI 存储命名空间坏掉都可能这样）。
+# 处理原则：
+#   ① 判定改成多后端，谁先给出结论用谁（后端1 命中时行为与旧版**完全一致**）；
+#   ② 每个后端的成败与**原始错误文本**都记进 $script:StorageDiag（-Mode StorageDiag 全量打印，出事能定位）；
+#   ③ 只有真读出 MBR 才算硬门槛；'未知' 降级为提示 + 诊断（让后面的 ESP/固件启动项步骤说话，别提前挡死）。
+# 后端顺序：
+#   1 Storage 模块 Get-Partition/Get-Disk（正常机器走这条）
+#   2 CIM root/Microsoft/Windows/Storage（同一提供程序，但**不需要 PowerShell 的 Storage 模块**）
+#   3 root/cimv2 老 WMI（Win32_LogicalDiskToPartition / Win32_DiskPartition，提供程序与 Storage 无关）
+#   4 直接读物理磁盘 LBA0/LBA1（不用任何 WMI/模块，需要管理员）
+#   5 裸读扫描 0..15 号盘 + mountvol 卷 GUID 反查系统盘（完全不需要 WMI；顺带解析出 ESP 分区）
+$script:StorageDiag = New-Object System.Collections.ArrayList
+$script:StorageFacts = $null
+$script:EspTypeGuidLc = '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}'
+function Add-StorageDiag { param([string]$Text) [void]$script:StorageDiag.Add($Text) }
+function Show-StorageDiag { foreach ($l in @($script:StorageDiag)) { Info $l } }
+
+# ---- 后端1：Storage 模块（老路径，正常机器就是这条）--------------------------
+function Get-SysPartitionByCmdlet {
+  param([string]$Letter)
+  try {
+    $p = @(Get-Partition -DriveLetter $Letter -ErrorAction Stop)
+    if ($p.Count -eq 0) { Add-StorageDiag '后端1 Storage 模块: Get-Partition 返回 0 个分区'; return $null }
+    if ($p.Count -gt 1) { Add-StorageDiag ('后端1 Storage 模块: 盘符 ' + $Letter + ' 命中 ' + $p.Count + ' 个分区，取第一个') }
+    $p = $p[0]
+    $o = [pscustomobject]@{
+      DiskNumber = [int]$p.DiskNumber; PartitionNumber = [int]$p.PartitionNumber
+      Offset = [uint64]$p.Offset; Size = [uint64]$p.Size; Guid = ([string]$p.Guid).ToLower()
+      Source = '后端1 Storage 模块'
+    }
+    Add-StorageDiag ('后端1 Storage 模块: 盘符 ' + $Letter + ' → disk ' + $o.DiskNumber + ' 分区 ' + $o.PartitionNumber + ' 起始 ' + $o.Offset + ' B 大小 ' + $o.Size + ' B GUID ' + $o.Guid)
+    return $o
+  } catch { Add-StorageDiag ('后端1 Storage 模块: Get-Partition 失败 - ' + $_.Exception.Message); return $null }
+}
+function Get-DiskStyleByCmdlet {
+  param([int]$Number)
+  try {
+    $d = Get-Disk -Number $Number -ErrorAction Stop
+    $s = [string]$d.PartitionStyle
+    Add-StorageDiag ('后端1 Storage 模块: Get-Disk ' + $Number + ' → ' + $s + '（' + [string]$d.FriendlyName + '）')
+    return $s
+  } catch { Add-StorageDiag ('后端1 Storage 模块: Get-Disk 失败 - ' + $_.Exception.Message); return '' }
+}
+
+# ---- 后端2：CIM（root/Microsoft/Windows/Storage，不需要 Storage 模块）---------
+function Get-CimStorageList {
+  param([string]$ClassName, [string]$Filter = '')
+  $ns = 'root/Microsoft/Windows/Storage'
+  try {
+    if ($Filter) { return @(Get-CimInstance -Namespace $ns -ClassName $ClassName -Filter $Filter -ErrorAction Stop) }
+    return @(Get-CimInstance -Namespace $ns -ClassName $ClassName -ErrorAction Stop)
+  } catch {
+    Add-StorageDiag ('后端2 CIM ' + $ClassName + $(if ($Filter) { '(' + $Filter + ')' } else { '' }) + ': 失败 - ' + $_.Exception.Message)
+    return @()
+  }
+}
+function Convert-DiskStyleNumber { param($V) switch ([int]$V) { 1 { return 'MBR' } 2 { return 'GPT' } default { return '' } } }
+function Get-SysPartitionByCim {
+  param([string]$Letter)
+  $code = [uint32][char]$Letter[0]
+  $arr = @(Get-CimStorageList 'MSFT_Partition' ('DriveLetter=' + $code))
+  if (@($arr).Count -eq 0) { Add-StorageDiag ('后端2 CIM: 没找到盘符 ' + $Letter + ' 的分区（MSFT_Partition DriveLetter=' + $code + '）'); return $null }
+  $p = @($arr)[0]
+  $o = [pscustomobject]@{
+    DiskNumber = [int]$p.DiskNumber; PartitionNumber = [int]$p.PartitionNumber
+    Offset = [uint64]$p.Offset; Size = [uint64]$p.Size; Guid = ([string]$p.Guid).ToLower()
+    Source = '后端2 CIM(Storage 命名空间)'
+  }
+  Add-StorageDiag ('后端2 CIM: 盘符 ' + $Letter + ' → disk ' + $o.DiskNumber + ' 分区 ' + $o.PartitionNumber + ' 起始 ' + $o.Offset + ' B 大小 ' + $o.Size + ' B GUID ' + $o.Guid)
+  return $o
+}
+function Get-SysDiskNumberByCim {
+  $arr = @(Get-CimStorageList 'MSFT_Disk' | Where-Object { $_.IsSystem -eq $true })
+  if (@($arr).Count -gt 0) { Add-StorageDiag ('后端2 CIM: IsSystem 磁盘 = ' + [int]$arr[0].Number); return [int]$arr[0].Number }
+  Add-StorageDiag '后端2 CIM: 没有 IsSystem 的磁盘'; return -1
+}
+function Get-DiskStyleByCim {
+  param([int]$Number)
+  $arr = @(Get-CimStorageList 'MSFT_Disk' | Where-Object { [int]$_.Number -eq $Number })
+  if (@($arr).Count -eq 0) { Add-StorageDiag ('后端2 CIM: 没有 disk ' + $Number); return '' }
+  $s = Convert-DiskStyleNumber $arr[0].PartitionStyle
+  Add-StorageDiag ('后端2 CIM: disk ' + $Number + ' PartitionStyle=' + [int]$arr[0].PartitionStyle + ' → ' + $(if ($s) { $s } else { '未知' }) + '（' + [string]$arr[0].FriendlyName + '）')
+  return $s
+}
+
+# ---- 后端3：root/cimv2 老 WMI（提供程序与 Storage 无关）-----------------------
+function Get-SysDiskByOldWmi {
+  try {
+    $partId = ''
+    foreach ($a in @(Get-CimInstance -ClassName Win32_LogicalDiskToPartition -ErrorAction Stop)) {
+      if ([string]$a.Dependent -match ('LogicalDisk.*DeviceID\s*=\s*"' + [regex]::Escape($env:SystemDrive) + '"')) {
+        $m = [regex]::Match([string]$a.Antecedent, 'Disk #\d+, Partition #\d+')
+        if ($m.Success) { $partId = $m.Value; break }
+      }
+    }
+    if (-not $partId) { Add-StorageDiag ('后端3 老 WMI: Win32_LogicalDiskToPartition 里没找到 ' + $env:SystemDrive); return $null }
+    $dn = [int]([regex]::Match($partId, 'Disk #(\d+)').Groups[1].Value)
+    $typeText = ''
+    $pp = @(Get-CimInstance -ClassName Win32_DiskPartition -Filter ("DeviceID='" + $partId + "'") -ErrorAction Stop)
+    if (@($pp).Count -gt 0) { $typeText = [string]$pp[0].Type }
+    # 只有 'GPT: xxx' 前缀能确定是 GPT；动态磁盘/老 MBR 的 Type 文本不带前缀 → 不能反推 MBR（交给后端4）
+    $style = ''
+    if ($typeText -match '^GPT') { $style = 'GPT' }
+    Add-StorageDiag ('后端3 老 WMI: ' + $env:SystemDrive + ' = ' + $partId + '（Type="' + $typeText + '"）→ ' + $(if ($style) { $style } else { '无法判定，需裸读确认' }))
+    return [pscustomobject]@{ DiskNumber = $dn; Style = $style; Type = $typeText }
+  } catch { Add-StorageDiag ('后端3 老 WMI: 失败 - ' + $_.Exception.Message); return $null }
+}
+
+# ---- GPT 分区表裸解析（后端4/5 用；不依赖任何 WMI / PowerShell 模块）---------
+function New-GptEntryInfo {
+  param([int]$Index, [byte[]]$Bytes)
+  $t = New-Object byte[] 16; [Array]::Copy($Bytes, 0, $t, 0, 16)
+  $u = New-Object byte[] 16; [Array]::Copy($Bytes, 16, $u, 0, 16)
+  $first = [BitConverter]::ToUInt64($Bytes, 32)
+  $last = [BitConverter]::ToUInt64($Bytes, 40)
+  return [pscustomobject]@{
+    PartitionNumber = $Index + 1
+    TypeGuid = ([Guid]::new($t)).ToString().ToLower()
+    UniqueGuid = ([Guid]::new($u)).ToString().ToLower()
+    FirstLba = $first; LastLba = $last
+    Offset = [uint64]($first * 512)
+    Size = [uint64](($last - $first + 1) * 512)
+  }
+}
+# 传 FileStream：物理磁盘（\\.\PHYSICALDRIVEn）和普通文件都能用 —— 普通文件便于离线单测
+function Read-GptTable {
+  param($Stream)
+  $res = @{ Ok = $false; Err = ''; Entries = @(); DiskGuid = ''; EntryLba = 0; Count = 0; EntrySize = 0 }
+  try {
+    $hdr = New-Object byte[] 512
+    $Stream.Position = [int64]512
+    $got = $Stream.Read($hdr, 0, 512)
+    if ($got -lt 92) { $res.Err = ('LBA1 只读到 ' + $got + ' 字节'); return $res }
+    if ([Text.Encoding]::ASCII.GetString($hdr, 0, 8) -ne 'EFI PART') { $res.Err = 'LBA1 不是 EFI PART 签名（不是 GPT）'; return $res }
+    $res.EntryLba = [BitConverter]::ToUInt64($hdr, 72)
+    $res.Count = [int][BitConverter]::ToUInt32($hdr, 80)
+    $res.EntrySize = [int][BitConverter]::ToUInt32($hdr, 84)
+    $dg = New-Object byte[] 16; [Array]::Copy($hdr, 56, $dg, 0, 16)
+    $res.DiskGuid = ([Guid]::new($dg)).ToString().ToLower()
+    if ($res.Count -lt 1 -or $res.Count -gt 512 -or $res.EntrySize -lt 128 -or $res.EntrySize -gt 4096 -or ($res.EntrySize % 128) -ne 0 -or $res.EntryLba -lt 2) {
+      # 2026-10-08（DSH 审查 Q3 低危项）：补两条 —— 表项大小必须是 128 的倍数（GPT 规范）、
+      #   分区表 LBA 至少是 2（LBA0=MBR / LBA1=GPT 头）。损坏表头只会走到 Err，不会算出垃圾偏移/大小。
+      $res.Err = ('GPT 头异常: 表项数=' + $res.Count + ' 表项大小=' + $res.EntrySize + ' 表项LBA=' + $res.EntryLba); return $res
+    }
+    $total = $res.Count * $res.EntrySize
+    $buf = New-Object byte[] $total
+    $Stream.Position = [int64]($res.EntryLba * 512)
+    $read = 0
+    while ($read -lt $total) { $n = $Stream.Read($buf, $read, $total - $read); if ($n -le 0) { break }; $read += $n }
+    if ($read -lt $total) { $res.Err = ('分区表读不全: ' + $read + '/' + $total); return $res }
+    $list = New-Object System.Collections.ArrayList
+    for ($i = 0; $i -lt $res.Count; $i++) {
+      $off = $i * $res.EntrySize
+      $zero = $true
+      for ($k = 0; $k -lt 16; $k++) { if ($buf[$off + $k] -ne 0) { $zero = $false; break } }
+      if ($zero) { continue }
+      $e = New-Object byte[] $res.EntrySize
+      [Array]::Copy($buf, $off, $e, 0, $res.EntrySize)
+      [void]$list.Add((New-GptEntryInfo -Index $i -Bytes $e))
+    }
+    $res.Entries = @($list); $res.Ok = $true
+    return $res
+  } catch { $res.Err = $_.Exception.Message; return $res }
+}
+function Get-DiskRawProbe {
+  param([int]$Number, $Stream = $null)   # Stream 只给离线单测用：塞一个普通文件流，就能跑同一条解析路径
+  # 只读打开物理磁盘，读 LBA0（MBR/保护性 MBR）+ LBA1（GPT 头 + 分区表）
+  $fs = $Stream
+  $mine = $false
+  try {
+    if (-not $fs) {
+      $fs = New-Object IO.FileStream(('\\.\PHYSICALDRIVE' + $Number), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+      $mine = $true
+    }
+    $sec = New-Object byte[] 512
+    $fs.Position = [int64]0
+    $n = $fs.Read($sec, 0, 512)
+    if ($n -lt 512) { return @{ Ok = $false; Err = ('LBA0 只读到 ' + $n + ' 字节') } }
+    $gpt = Read-GptTable -Stream $fs
+    return @{
+      Ok = $true; Err = ''; Gpt = $gpt
+      FirstType = [int]$sec[450]                       # 第一个分区表项的类型（0xEE = 保护性 MBR = GPT）
+      MbrSig = ($sec[510] -eq 0x55 -and $sec[511] -eq 0xAA)
+      Active = ([int]$sec[446] -eq 0x80)               # 第一个分区表项的活动标志
+      DiskSig = ('{0:X8}' -f [BitConverter]::ToUInt32($sec, 440))
+    }
+  } catch { return @{ Ok = $false; Err = $_.Exception.Message } } finally { if ($mine -and $fs) { $fs.Dispose() } }
+}
+function Get-RawStyleFromProbe {
+  param($Probe)
+  if (-not $Probe -or -not $Probe.Ok) { return '' }
+  if ($Probe.Gpt -and $Probe.Gpt.Ok) { return 'GPT' }
+  if ($Probe.FirstType -eq 0xEE) { return 'GPT' }      # 4Kn 盘 GPT 头在 LBA1*4096，靠保护性 MBR 认出来
+  if ($Probe.MbrSig) { return 'MBR' }
+  return ''
+}
+# 磁盘号是连续的：碰到“找不到文件”就说明后面没有更多磁盘了 —— 别把 10..15 的噪音打满屏
+function Test-RawDiskMissing { param([string]$Err) return ($Err -match '未能找到文件|cannot find the file|系统找不到指定的文件') }
+
+# ---- 后端5：裸读扫描 + mountvol 卷 GUID 反查系统盘（完全不需要 WMI）----------
+function Get-SysDiskByRawScan {
+  $vol = Get-EspVolumeGuid ($env:SystemDrive)
+  if (-not $vol) { Add-StorageDiag ('后端5 裸读扫描: mountvol 读不到 ' + $env:SystemDrive + ' 的卷 GUID'); return $null }
+  Add-StorageDiag ('后端5 裸读扫描: ' + $env:SystemDrive + ' 卷 GUID=' + $vol + ' → 在磁盘 0..15 的 GPT 分区表里反查')
+  $bootCands = New-Object System.Collections.ArrayList
+  for ($i = 0; $i -lt 16; $i++) {
+    $pr = Get-DiskRawProbe -Number $i
+    if (-not $pr.Ok) {
+      Add-StorageDiag ('后端5 裸读扫描: disk ' + $i + ' 打不开 - ' + $pr.Err)
+      if (Test-RawDiskMissing ([string]$pr.Err)) { Add-StorageDiag ('后端5 裸读扫描: disk ' + $i + ' 之后没有更多磁盘，停止扫描'); break }
+      continue
+    }
+    if ($pr.Gpt -and $pr.Gpt.Ok) {
+      Add-StorageDiag ('后端5 裸读扫描: disk ' + $i + ' = GPT（分区 ' + @($pr.Gpt.Entries).Count + ' 个，磁盘 GUID ' + $pr.Gpt.DiskGuid + '）')
+      if (@($pr.Gpt.Entries | Where-Object { $_.UniqueGuid -eq $vol }).Count -gt 0) {
+        Add-StorageDiag ('后端5 裸读扫描: disk ' + $i + ' 的分区表里含 ' + $env:SystemDrive + ' 的卷 GUID → 这就是系统盘')
+        return @{ DiskNumber = $i; Style = 'GPT'; StyleByGuess = $false; Probe = $pr; VolumeGuid = $vol }
+      }
+    } else {
+      $st = Get-RawStyleFromProbe $pr
+      Add-StorageDiag ('后端5 裸读扫描: disk ' + $i + ' 不是 GPT（LBA1: ' + [string]$pr.Gpt.Err + '；LBA0 首分区类型=0x' + ('{0:X2}' -f $pr.FirstType) + ' 启动签名=' + [string]$pr.MbrSig + '）')
+      if ($st -eq 'MBR' -and $pr.Active) { [void]$bootCands.Add($i) }
+    }
+  }
+  if ($bootCands.Count -gt 0) {
+    Add-StorageDiag ('后端5 裸读扫描: 有活动(0x80)分区的 MBR 盘 = ' + ($bootCands -join ',') + ' → 按推断取 disk ' + $bootCands[0])
+    return @{ DiskNumber = [int]$bootCands[0]; Style = 'MBR'; StyleByGuess = $true; Probe = $null; VolumeGuid = $vol }
+  }
+  Add-StorageDiag '后端5 裸读扫描: 没反查到系统盘'
+  return $null
+}
+
+# ---- 汇总：系统盘样式 + 系统盘分区 + ESP 分区（带缓存，一次运行只算一次）-----
+function Get-StorageFacts {
+  if ($script:StorageFacts) { return $script:StorageFacts }
+  $f = @{ Style = '未知'; StyleSource = ''; StyleConfirmed = $false; StyleError = ''
+          SysDisk = -1; SysPart = $null; EspPart = $null; VolumeGuid = ''; RawProbe = $null }
+  $script:StorageFacts = $f
+  $letter = $env:SystemDrive.TrimEnd(':')
+  # 后端1
+  $p = Get-SysPartitionByCmdlet $letter
+  if ($p) {
+    $f.SysPart = $p; $f.SysDisk = $p.DiskNumber
+    $st = Get-DiskStyleByCmdlet $p.DiskNumber
+    if ($st) { $f.Style = $st; $f.StyleSource = '后端1 Storage 模块 (Get-Disk)'; $f.StyleConfirmed = $true }
+  }
+  # 后端2
+  if ($f.Style -eq '未知') {
+    if (-not $f.SysPart) { $p = Get-SysPartitionByCim $letter; if ($p) { $f.SysPart = $p; $f.SysDisk = $p.DiskNumber } }
+    $dn = $f.SysDisk
+    if ($dn -lt 0) { $dn = Get-SysDiskNumberByCim }
+    if ($dn -ge 0) {
+      $st = Get-DiskStyleByCim $dn
+      if ($st) {
+        $f.Style = $st; $f.StyleSource = '后端2 CIM (MSFT_Disk)'; $f.StyleConfirmed = $true
+        if ($f.SysDisk -lt 0) { $f.SysDisk = $dn }
+      }
+    }
+  }
+  # 后端3
+  if ($f.Style -eq '未知' -or $f.SysDisk -lt 0) {
+    $w = Get-SysDiskByOldWmi
+    if ($w) {
+      if ($f.SysDisk -lt 0) { $f.SysDisk = $w.DiskNumber }
+      if ($f.Style -eq '未知' -and $w.Style) { $f.Style = $w.Style; $f.StyleSource = '后端3 root/cimv2 (Win32_DiskPartition)'; $f.StyleConfirmed = $true }
+    }
+  }
+  # 后端4（已知磁盘号 → 裸读确认）
+  if ($f.Style -eq '未知' -and $f.SysDisk -ge 0) {
+    $pr = Get-DiskRawProbe -Number $f.SysDisk
+    if ($pr.Ok) {
+      $f.RawProbe = $pr
+      $st = Get-RawStyleFromProbe $pr
+      if ($st) { $f.Style = $st; $f.StyleSource = ('后端4 裸读 LBA0/LBA1 (disk ' + $f.SysDisk + ')'); $f.StyleConfirmed = $true }
+    } else { Add-StorageDiag ('后端4 裸读: disk ' + $f.SysDisk + ' 失败 - ' + [string]$pr.Err) }
+  }
+  # 后端5（裸读扫描 + 卷 GUID 反查）—— 只在“样式还没定”或“系统盘号还不知道”时才扫，
+  #   正常机器（后端1 已给出结论）不要为了兜底去开 16 个物理磁盘句柄。
+  if ($f.Style -eq '未知' -or $f.SysDisk -lt 0) {
+    $s = Get-SysDiskByRawScan
+    if ($s) {
+      if ($f.SysDisk -lt 0) { $f.SysDisk = $s.DiskNumber }
+      $f.VolumeGuid = [string]$s.VolumeGuid
+      if ($f.Style -eq '未知' -and $s.Style) {
+        $f.Style = $s.Style
+        $f.StyleSource = $(if ($s.StyleByGuess) { '后端5 裸读扫描 + 活动分区推断（不确定）' } else { '后端5 裸读扫描 + 卷 GUID 反查' })
+        $f.StyleConfirmed = (-not $s.StyleByGuess)
+      }
+      if ($s.Probe) { $f.RawProbe = $s.Probe }
+    }
+  }
+  if ($f.Style -eq '未知') { $f.StyleError = '所有后端都读不出分区样式（Storage 模块 / CIM 存储命名空间 / 老 WMI / 裸读 全失败，逐条见下面的「存储信息诊断」）' }
+  return $f
+}
+
+# ---- ESP 兜底：Get-Partition 拿不到候选时，改用 CIM → 裸读 GPT --------------
+function New-EspPartFromRaw {
+  param([int]$DiskNumber, [int]$PartitionNumber, [uint64]$Offset, [uint64]$Size, [string]$Guid, [string]$Source = '')
+  if ([string]::IsNullOrEmpty($Guid)) { return $null }
+  $g = [Guid]$Guid
+  return [pscustomobject]@{
+    DiskNumber = $DiskNumber; PartitionNumber = $PartitionNumber
+    Offset = $Offset; Size = $Size; Guid = $g; GuidText = $g.ToString().ToLower(); Source = $Source
+  }
+}
+function Get-EspPartitionFallback {
+  param([string]$EspType = $script:EspTypeGuidLc)
+  $f = Get-StorageFacts
+  # 坑（2026-10-08 离线单测抓到）：调用方传进来的是**带花括号**的形式 '{c12a7328-…}'（Get-Partition 的 GptType 就是带括号的），
+  #   而裸读 GPT 解析出的 TypeGuid 是**不带花括号的小写** → 直接比对永远不中，ESP 兜底会静默失效。
+  #   这里统一成不带括号的小写；给 CIM 用的时候再补回花括号。
+  $espNorm = ([string]$EspType).Trim().Trim('{', '}').ToLower()
+  # 系统盘号都不知道（Storage + CIM + 老 WMI 全挂了）→ 先用卷 GUID 裸读反查一遍
+  if ($f.SysDisk -lt 0) {
+    $s = Get-SysDiskByRawScan
+    if ($s) { $f.SysDisk = $s.DiskNumber; $f.VolumeGuid = [string]$s.VolumeGuid; if ($s.Probe) { $f.RawProbe = $s.Probe } }
+  }
+  # ① CIM（Storage 命名空间；老路径的 Get-Partition 挂了，CIM 可能还活着）
+  $arr = @(Get-CimStorageList 'MSFT_Partition' ("GptType='{" + $espNorm + "}'"))
+  if (@($arr).Count -gt 0) {
+    $same = @($arr | Where-Object { [int]$_.DiskNumber -eq $f.SysDisk })
+    $pick = $null
+    if ($same.Count -gt 0) { $pick = @($same | Sort-Object { [int]$_.PartitionNumber })[0] } else { $pick = @($arr | Sort-Object { [int]$_.PartitionNumber })[0] }
+    Add-StorageDiag ('ESP 兜底(CIM): disk ' + [int]$pick.DiskNumber + ' 分区 ' + [int]$pick.PartitionNumber + ' 起始 ' + [uint64]$pick.Offset + ' B 大小 ' + [uint64]$pick.Size + ' B')
+    $o = New-EspPartFromRaw -DiskNumber ([int]$pick.DiskNumber) -PartitionNumber ([int]$pick.PartitionNumber) -Offset ([uint64]$pick.Offset) -Size ([uint64]$pick.Size) -Guid ([string]$pick.Guid) -Source 'CIM(Storage 命名空间)'
+    if ($o) { return $o }
+  }
+  # ② 裸读 GPT（完全不需要 WMI）
+  $pr = $f.RawProbe
+  if ((-not $pr -or -not $pr.Ok) -and $f.SysDisk -ge 0) { $pr = Get-DiskRawProbe -Number $f.SysDisk }
+  if ($pr -and $pr.Ok -and $pr.Gpt -and $pr.Gpt.Ok) {
+    $esp = @($pr.Gpt.Entries | Where-Object { $_.TypeGuid -eq $espNorm })
+    if ($esp.Count -gt 0) {
+      $pick = @($esp | Sort-Object PartitionNumber)[0]
+      Add-StorageDiag ('ESP 兜底(裸读): disk ' + $f.SysDisk + ' 分区 ' + $pick.PartitionNumber + ' 起始 ' + $pick.Offset + ' B 大小 ' + $pick.Size + ' B GUID ' + $pick.UniqueGuid)
+      return (New-EspPartFromRaw -DiskNumber $f.SysDisk -PartitionNumber $pick.PartitionNumber -Offset $pick.Offset -Size $pick.Size -Guid $pick.UniqueGuid -Source ('裸读 GPT (disk ' + $f.SysDisk + ')'))
+    }
+    Add-StorageDiag 'ESP 兜底(裸读): 系统盘的分区表里没有 ESP 类型分区'
+  }
+  return $null
+}
+
+# ---- 只读预检：样式"未知"的机器，只要 ESP 也挂不上，就必须在**动手改任何东西之前**停
+# 2026-10-08（按 DSH 审查 Q4 加）：'未知' 不再当硬门槛后，真 MBR/非 UEFI 引导的机器会一路走到
+#   Install-Efi 的挂 ESP 那一步才失败 —— 但它前面已经落了驱动/服务/注册表/任务 6 步改动，留下半成品。
+#   这里用只读事实补回来：Get-CheckReport 里已经试挂过 ESP（$rep.Esp，管理员才会有值），
+#   挂不上 = 这台机器确实没有可用的 EFI 系统分区 → 按旧版行为"一步都不改"地停住（只是理由写得对）。
+#   反过来：GPT 盘 + 存储接口坏（客户机那种）照样能装 —— ESP 挂得上，这条不成立。
+function Test-EspPrecheckBlocked {
+  param($Report)
+  if ([string]$Report.DiskStyle -eq 'GPT') { return $false }
+  # 只有「MBR **且已确认**」才跳过 —— 那种情况下上面那条 Bad 已经拦了，别重复计数。
+  # 坑（2026-10-08 DSH 第二轮审查 · 必修）：原来是只要 DiskStyle 等于 MBR 就无条件跳过，
+  #   而后端5「活动分区推断」会产出 Style='MBR' 但 Confirmed=$false —— 那种机器会落进 elseif
+  #   （因为调用方的 Bad 条件是 `MBR -and Confirmed`），然后被这个函数放过，于是照样先落 6 步写操作、
+  #   到挂 ESP 才失败 = Q4 没堵全。现在改成必须"已确认"才跳过。
+  if ([string]$Report.DiskStyle -eq 'MBR' -and $Report.DiskStyleConfirmed) { return $false }
+  if (-not $Report.Admin) { return $false }                   # 没试挂过（非管理员）→ 不据此下结论
+  if ($Report.Esp) { return $false }
+  return $true
+}
+
+# ---- 诊断模式：把上面所有后端的原始结果打全（客户机让你一眼看出为什么判定失败）----
+function Invoke-StorageDiag {
+  Head '存储信息诊断（StorageDiag）'
+  Info ('管理员   : ' + (Test-Admin))
+  Info ('系统盘   : ' + $env:SystemDrive + '    机器名: ' + $env:COMPUTERNAME)
+  try { $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop; Info ('系统     : ' + [string]$os.Caption + '  ' + [string]$os.Version + '  build ' + [string]$os.BuildNumber) } catch { Info ('系统     : 读不到（' + $_.Exception.Message + '）') }
+  try { Info ('固件类型 : ' + (Get-ComputerInfo -Property BiosFirmwareType).BiosFirmwareType) } catch { Info ('固件类型 : 读不到（' + $_.Exception.Message + '）') }
+  $modDir = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\Modules\Storage'
+  $mods = @()
+  try { $mods = @(Get-Module -ListAvailable -Name Storage -ErrorAction SilentlyContinue | ForEach-Object { $_.Path }) } catch { }
+  Info ('Storage 模块: 目录存在=' + (Test-Path $modDir) + '（' + $modDir + '）  Get-Module 找到=' + $mods.Count + $(if ($mods.Count -gt 0) { ' → ' + ($mods -join ' ; ') } else { '' }))
+  Info '（上面这行是关键：装机版/精简版 Windows 常把 Storage 模块删掉，Get-Partition/Get-Disk 就整个不可用）'
+  Info ('C: 卷 GUID: ' + (Get-EspVolumeGuid $env:SystemDrive) + '（mountvol，不需要 WMI）')
+  Head '各后端结论'
+  $f = Get-StorageFacts
+  Info ('分区样式 : ' + $f.Style + $(if ($f.StyleConfirmed) { '（已确认）' } else { '（未确认）' }) + '    来源: ' + $(if ($f.StyleSource) { $f.StyleSource } else { '无' }))
+  Info ('系统盘号 : ' + $(if ($f.SysDisk -ge 0) { [string]$f.SysDisk } else { '未知' }))
+  if ($f.SysPart) { Info ('C: 分区  : disk ' + $f.SysPart.DiskNumber + ' 分区 ' + $f.SysPart.PartitionNumber + ' 起始 ' + $f.SysPart.Offset + ' B 大小 ' + $f.SysPart.Size + ' B 来源=' + $f.SysPart.Source) } else { Info 'C: 分区  : 拿不到' }
+  # ESP：主路径（Get-Partition）与最终结果分开打印 —— 兜底到底有没有用上，一眼可见
+  $mainN = -1; $mainErr = ''
+  try { $mainN = @(Get-Partition -ErrorAction Stop | Where-Object { ([string]$_.GptType).ToLower() -eq $script:EspTypeGuidLc }).Count } catch { $mainErr = $_.Exception.Message }
+  Info ('ESP 主路径: Get-Partition 候选 = ' + $(if ($mainN -lt 0) { '调用失败 - ' + $mainErr } else { [string]$mainN + ' 个' }))
+  $esp = $null
+  try { $esp = Get-EspPartitionInfo } catch { Info ('ESP 分区  : Get-EspPartitionInfo 抛异常 - ' + $_.Exception.Message) }
+  if ($esp) { Info ('ESP 分区  : disk ' + $esp.DiskNumber + ' 分区 ' + $esp.PartitionNumber + ' 起始 ' + $esp.Offset + ' B 大小 ' + $esp.Size + ' B GUID ' + $esp.GuidText + ' 来源=' + $(if ($esp.PSObject.Properties['Source']) { $esp.Source } else { '主路径 Get-Partition' })) }
+  else { Info 'ESP 分区  : 拿不到（主路径与兜底都没找到）' }
+  Head '逐盘裸读（0..15，不需要 WMI；需要管理员）'
+  for ($i = 0; $i -lt 16; $i++) {
+    $pr = Get-DiskRawProbe -Number $i
+    if (-not $pr.Ok) {
+      Info ('disk ' + $i + ' : 打不开 - ' + [string]$pr.Err)
+      if (Test-RawDiskMissing ([string]$pr.Err)) { Info ('disk ' + $i + ' 之后没有更多磁盘，停止扫描'); break }
+      continue
+    }
+    $st = Get-RawStyleFromProbe $pr
+    $line = 'disk ' + $i + ' : ' + $(if ($st) { $st } else { '样式无法判定' }) + '  LBA0首分区类型=0x' + ('{0:X2}' -f $pr.FirstType) + ' 启动签名=' + [string]$pr.MbrSig + ' 磁盘签名=' + [string]$pr.DiskSig
+    if ($pr.Gpt -and $pr.Gpt.Ok) {
+      $line += '  GPT: 分区 ' + @($pr.Gpt.Entries).Count + ' 个 磁盘GUID=' + $pr.Gpt.DiskGuid
+      Info $line
+      foreach ($e in @($pr.Gpt.Entries)) { Info ('          分区 ' + $e.PartitionNumber + ' 类型 ' + $e.TypeGuid + ' 起始 ' + $e.Offset + ' B 大小 ' + $e.Size + ' B GUID ' + $e.UniqueGuid + $(if ($e.TypeGuid -eq ([string]$script:EspTypeGuidLc).Trim('{', '}').ToLower()) { '   <== ESP' } else { '' })) }
+    } else { Info ($line + '  非 GPT: ' + [string]$pr.Gpt.Err) }
+  }
+  Head '后端调用明细（原始错误文本）'
+  Show-StorageDiag
+  Say ''
+  Say '   把这一屏（或本次 run-*.log）发给作者即可定位。' 'Yellow'
+}
+
 # ================================================================ 体检
 function Get-CheckReport {
   $r = [ordered]@{}
   $r.Admin = Test-Admin
   try { $r.Firmware = (Get-ComputerInfo -Property BiosFirmwareType).BiosFirmwareType } catch { $r.Firmware = '未知' }
   try { $r.SecureBoot = (Confirm-SecureBootUEFI) } catch { $r.SecureBoot = '未知' }
+  # 2026-10-08：多后端判定系统盘样式。客户机（装机版/精简版 Windows）上 Get-Partition/Get-Disk 会抛异常，
+  #   旧版直接吞成 '未知' → 被当成 MBR 盘挡死安装（现场：diskpart 里磁盘 0/1/2 全是 GPT）。
+  #   现在顺序：1 Storage 模块 → 2 CIM(Storage 命名空间) → 3 老 WMI → 4 裸读 LBA0/LBA1 → 5 裸读扫描+卷GUID反查；
+  #   每个后端的原始错误文本都进 $script:StorageDiag（-Mode StorageDiag 可全量打印）。
   try {
-    $sysPart = Get-Partition -DriveLetter ($env:SystemDrive.TrimEnd(':')) -ErrorAction Stop
-    $disk = Get-Disk -Number $sysPart.DiskNumber -ErrorAction Stop
-    $r.DiskStyle = $disk.PartitionStyle
-  } catch { $r.DiskStyle = '未知' }
+    $facts = Get-StorageFacts
+    $r.DiskStyle = $facts.Style
+    $r.DiskStyleSource = $facts.StyleSource
+    $r.DiskStyleConfirmed = $facts.StyleConfirmed
+    $r.DiskStyleError = $facts.StyleError
+    $r.SysDiskNumber = $facts.SysDisk
+  } catch {
+    $r.DiskStyle = '未知'; $r.DiskStyleSource = ''; $r.DiskStyleConfirmed = $false
+    $r.DiskStyleError = ('多后端判定本身出错: ' + $_.Exception.Message); $r.SysDiskNumber = -1
+  }
   try {
     $bl = Get-BitLockerVolume -MountPoint $env:SystemDrive -ErrorAction Stop
     $r.BitLocker = [string]$bl.ProtectionStatus
@@ -789,6 +1269,9 @@ function Get-CheckReport {
   $r.Blocklist = ''
   # 易受攻击驱动阻止列表：开着时可能把 ThrottleStop / WinRing0 的服务改成"禁用"（客户机实测 Start=4 → sc start 1058）
   try { $r.Blocklist = [string](Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name 'VulnerableDriverBlocklistEnable' -ErrorAction SilentlyContinue).VulnerableDriverBlocklistEnable } catch { }
+  # 2026-10-10（审查 A1）：内核隔离(HVCI/内存完整性) 会在映像加载阶段拦 BYOVD 驱动（现场 exit 13/577），与阻止列表是两回事
+  $r.Hvci = ''
+  try { $r.Hvci = [string](Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity' -Name 'Enabled' -ErrorAction SilentlyContinue).Enabled } catch { }
   $r.Hiberboot = ''
   try { $r.Hiberboot = [string](Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power' -Name 'HiberbootEnabled' -ErrorAction SilentlyContinue).HiberbootEnabled } catch { }
   # 2026-09-30：快速启动 = 1 时"关机"是混合关机（内核/驱动从 hiberfile 恢复）→ nvlddmkm 不重新初始化，
@@ -808,7 +1291,16 @@ function Show-Check {
   Info ("管理员权限 : " + $Report.Admin)
   $fwOk = ($Report.Firmware -eq 'Uefi')
   if ($fwOk) { Ok ("固件类型   : " + $Report.Firmware + "（UEFI 必需）") } else { Bad ("固件类型   : " + $Report.Firmware + " —— 必须是 UEFI，MBR 盘要先 mbr2gpt") }
-  if ($Report.DiskStyle -eq 'GPT') { Ok ("系统盘分区 : GPT") } else { Bad ("系统盘分区 : " + $Report.DiskStyle + " —— 必须是 GPT") }
+  if ($Report.DiskStyle -eq 'GPT') { Ok ("系统盘分区 : GPT" + $(if ($Report.DiskStyleSource) { "（判定来源: " + $Report.DiskStyleSource + "）" } else { "" })) }
+  elseif ($Report.DiskStyle -eq 'MBR' -and $Report.DiskStyleConfirmed) { Bad "系统盘分区 : MBR —— 必须是 GPT（UEFI 引导 + ESP 是前提；MBR 盘先 mbr2gpt /convert /allowFullOS）" }
+  else {
+    # 2026-10-08：读不到分区样式 ≠ MBR 盘（客户机实测：diskpart 里三块盘全是 GPT，只是 Storage 接口坏了）
+    Warn ("系统盘分区 : 读不到（" + $Report.DiskStyle + "）—— 这不等于 MBR 盘；逐后端诊断见下")
+    Info ("判定来源: " + $(if ($Report.DiskStyleSource) { $Report.DiskStyleSource } else { '所有后端都失败' }))
+    if ($Report.DiskStyleError) { Info ("说明    : " + $Report.DiskStyleError) }
+    Show-StorageDiag
+    Add-Action '系统盘分区样式读不到：跑 工具-测试与修复\存储体检.cmd（等价 -Mode StorageDiag）把输出和本次日志发给作者'
+  }
   if ($Report.SecureBoot -eq $false) { Ok "Secure Boot: 已关闭（必需关闭，否则解锁 EFI 不加载）" }
   elseif ($Report.SecureBoot -eq $true) { Bad "Secure Boot: 开启 —— 请在 BIOS 里关闭" }
   else { Warn ("Secure Boot: " + $Report.SecureBoot + "（读不到，请自行确认已关闭）"); Add-Action '固件里读不到 Secure Boot 状态：请进 BIOS 自行确认已关闭' }
@@ -822,11 +1314,13 @@ function Show-Check {
     if ($Report.Gpus.Count -gt 0) { Bad ("未找到 CMP 40HX（DEV_1F0B），当前 NVIDIA 设备: " + (($Report.Gpus | ForEach-Object { $_.InstanceId }) -join '; ')) }
     else { Bad "未找到 NVIDIA 显卡（VEN_10DE）" }
   }
+  # 2026-10-10（审查高-1）：$gspSev 必须两个分支都可用 —— else 分支（没装 N 卡驱动、没有 nvidia-smi）也引用它
+  $gspSev = 'Bad'; if ($FromInstall) { $gspSev = 'Warn' }
   if ($Report.Smi) {
     $csv = (Invoke-Native { & $Report.Smi --query-gpu=name,driver_version,pci.bus_id,pcie.link.gen.current,pcie.link.gen.max,pcie.link.width.current --format=csv,noheader 2>&1 } | Out-String).Trim()
     Info ("nvidia-smi : " + $csv)
     # 2026-09-30：Install 阶段这里是「本脚本会自己补」的事项 → 记提示 + 待办；只有 -Mode Check（纯体检）才记失败
-    $gspSev = 'Bad'; if ($FromInstall) { $gspSev = 'Warn' }
+    # （$gspSev 已在 if ($Report.Smi) 之前赋值 —— 2026-10-10 审查高-1）
     if ($Report.GspState -eq 'on') { Ok ("GSP 固件   : " + $Report.GspValue + "（已启用，正常）") }
     elseif ($Report.GspState -eq 'off') {
       & $gspSev ("GSP 固件   : 未启用（" + $Report.GspLine + "）—— 解锁后 nvlddmkm 认不了卡 = 黑屏 + 设备管理器代码 43")
@@ -843,11 +1337,15 @@ function Show-Check {
     Warn '易受攻击驱动列表 : 开着（VulnerableDriverBlocklistEnable=1）—— 它/360/ACE 都可能把 ThrottleStop·WinRing0 的服务改成“禁用”，表现为老路径 sc start 失败 1058；本包每次开机都会自愈：WinRing0 启动类型纠正回 demand；ThrottleStop 则被停掉并禁用（它加载在内核里会被腾讯 ACE-BOOT 判为兼容性问题）'
     Add-Action '易受攻击驱动列表开着：想彻底关掉（厂商安装器也关它）就用 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 0 /f 然后重启；不关也行，本包每次开机都会纠正服务启动类型'
   } else { Ok ('易受攻击驱动列表 : ' + $(if ($Report.Blocklist -eq '') { '未设置（按关处理）' } else { '已关（0）' })) }
+  if ($Report.Hvci -eq '1') {
+    Warn '内核隔离(内存完整性): 开着 —— 会拦 inpoutx64/WinRing0 驱动加载（Gen2 落不了地，算力不受影响）'
+    Add-Action '内核隔离开着：设置 → 隐私和安全性 → Windows 安全中心 → 设备安全性 → 内核隔离 → 关「内存完整性」，然后完全关机再开机'
+  } else { Ok ('内核隔离(内存完整性): ' + $(if ($Report.Hvci -eq '0') { '已关' } else { '未设置（按关处理）' })) }
   if ($Report.HiberbootOn) {
     Warn '快速启动   : 开着（HiberbootEnabled=1）—— "关机"其实是混合关机：内核和显卡驱动从 hiberfile 恢复、不重新初始化，GSP 这类改动永远不生效（Install 会自动关掉它）'
     Add-Action '快速启动开着：Install 已把它关掉；重启/关机后请确认 HiberbootEnabled=0（关掉后"关机"才是真关机）'
   } else { Ok ('快速启动   : 已关闭（HiberbootEnabled=' + $(if ($Report.Hiberboot -eq '') { '未设置，按关处理' } else { $Report.Hiberboot }) + '）') }
-  Info "BIOS 里必须确认: Above 4G Decoding = Enabled、CSM = Disabled、Fast Boot = Disabled（这三项 OS 侧读不到，是头号失败原因）"
+  Info "BIOS 建议确认（OS 侧读不到）: Above 4G Decoding = Enabled、CSM = Disabled、Fast Boot = Disabled —— 不是硬性前提（单卡不开 Above 4G 多数也能解锁），但认不到卡/解锁固件没被执行时先查这三项"
 
   Head '杀软 / 反作弊'
   if ($Report.Huorong) {
@@ -873,7 +1371,7 @@ function Show-Check {
     }
   } catch {}
 
-  if ($Report.AceBoot) { Warn '检测到腾讯 ACE-BOOT 反作弊（会在映像加载阶段拦 ThrottleStop.sys）—— 首选新路径用 inpoutx64 直写寄存器，ACE-BOOT 全程不用停；只有新路径失败才回落到“停ACE→重训→恢复ACE”，无需手工关闭' }
+  if ($Report.AceBoot) { Warn '检测到腾讯 ACE-BOOT 反作弊（会在映像加载阶段拦 ThrottleStop.sys）—— 重训只走 inpoutx64 新路径，ACE-BOOT 全程不停（2026-10-10 起已移除“停ACE”降级链）；新路径失败只记日志，按 排查指引.md 第 2.3 节查 NewPath EXIT 码，无需手工关闭 ACE' }
   else { Ok '未检测到 ACE-BOOT' }
 
   Head '现状'
@@ -996,9 +1494,15 @@ function Show-Check {
   # 安全加固现状（2026-10-01b）
   foreach ($h in $script:HardeningDirs) {
     if (-not (Test-Path -LiteralPath $h.Path)) { continue }
-    $wr = @(Get-UsersWriteRights $h.Path)
-    if ($wr.Count -eq 0) { Ok ("目录权限: " + $h.Path + " = 只有 SYSTEM/Administrators 可写") }
-    else { Warn ("目录权限: " + $h.Path + " 普通用户可写（" + ($wr -join ', ') + "）= 本地提权面 —— 跑一次 -Mode Repair 收紧（只改 ACL，有备份可回滚）"); Add-Action ('目录权限没收紧: ' + $h.Path + ' → 跑 -Mode Repair（改 ACL，备份在 logs\acl-backup-*，可双击 工具-测试与修复\回滚-安全加固.cmd 退回）') }
+    $wrRaw = Get-UsersWriteRights $h.Path
+    if ($wrRaw -eq 'unknown') {
+      # 2026-10-10（审查中-2）：ACL 读不到就如实说读不到，不再误报"已收紧"
+      Warn ("目录权限: " + $h.Path + " 读不到 ACL（无法判定是否已收紧）—— 不影响功能；想收紧可跑 -Mode Repair")
+    } else {
+      $wr = @($wrRaw)
+      if ($wr.Count -eq 0) { Ok ("目录权限: " + $h.Path + " = 只有 SYSTEM/Administrators 可写") }
+      else { Warn ("目录权限: " + $h.Path + " 普通用户可写（" + ($wr -join ', ') + "）= 本地提权面 —— 跑一次 -Mode Repair 收紧（只改 ACL，有备份可回滚）"); Add-Action ('目录权限没收紧: ' + $h.Path + ' → 跑 -Mode Repair（改 ACL，备份在 logs\acl-backup-*，可双击 工具-测试与修复\回滚-安全加固.cmd 退回）') }
+    }
   }
   foreach ($d in @($script:ProgDataDrv, (Join-Path $env:ProgramData '40HXUnlock\drivers'))) {
     if (-not (Test-Path -LiteralPath $d)) { continue }
@@ -1046,7 +1550,7 @@ function Get-UsersWriteRights([string]$Path) {
       $fr = [string]$r.FileSystemRights
       if ($fr -match 'Write|Modify|FullControl|CreateFiles|AppendData|TakeOwnership|ChangePermissions') { $hits += ($id + ':' + $fr) }
     }
-  } catch { }
+  } catch { return 'unknown' }   # 2026-10-10（审查中-2）：读不到 ≠ 已收紧，调用方必须显式区分
   return $hits
 }
 function Backup-DirAcl([string]$Path) {
@@ -1062,7 +1566,10 @@ function Backup-DirAcl([string]$Path) {
 }
 function Set-DirAclHardened([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) { return 'skip' }
-  if (@(Get-UsersWriteRights $Path).Count -eq 0) { return 'ok' }
+  # 2026-10-10（审查中-2）：'unknown' = 读不到 ACL，不算"已收紧"，继续往下收紧
+  $wrPre = Get-UsersWriteRights $Path
+  if ($wrPre -eq 'unknown') { Warn ('目录权限读不到（ACL 读取失败），按需要收紧处理: ' + $Path) }
+  elseif (@($wrPre).Count -eq 0) { return 'ok' }
   $bak = Backup-DirAcl $Path
   # 只改"目录自身"的 ACL，**绝不加 /T**。
   #   2026-10-01b 本机实测踩到：icacls /T + /inheritance:r 会把"只有继承 ACE"的子文件清成无 DACL
@@ -1089,7 +1596,9 @@ function Set-DirAclHardened([string]$Path) {
     }
   } catch { }
   if ($repaired -gt 0) { Ok ('  顺带修回了 ' + $repaired + ' 个丢权限的文件（历史 ACL 操作遗留）') }
-  if (@(Get-UsersWriteRights $Path).Count -gt 0) { return 'fail:still-writable' }
+  $wrPost = Get-UsersWriteRights $Path
+  if ($wrPost -eq 'unknown') { return 'unknown:acl-unreadable' }   # 2026-10-10（审查中-2）：读不到就如实报未知（调用方按 Warn 处理）
+  if (@($wrPost).Count -gt 0) { return 'fail:still-writable' }
   if ($bak) { return ('changed:' + $bak) }
   return 'changed'
 }
@@ -1239,7 +1748,8 @@ function Install-WindowsFiles {
       $wantMd5 = @{}
     }
   }
-  $helperList = @('CMP40HXGen2.exe', 'AutoRetrain.cmd', 'Status.cmd', 'Uninstall_Auto.cmd', 'ACE-Toggle.ps1', '40hx-retrain-inpout.ps1', 'Unpack-Drivers.ps1')
+  # 2026-10-10（用户要求）：CMP40HXGen2.exe / AutoRetrain.cmd 随降级链移除，不再部署
+  $helperList = @('Status.cmd', 'Uninstall_Auto.cmd', 'ACE-Toggle.ps1', '40hx-retrain-inpout.ps1', 'Unpack-Drivers.ps1')
   foreach ($f in $helperList) {
     $s = Join-Path $src $f
     if (-not (Test-Path $s)) { Fail ("载荷缺失: " + $s) $script:ExitHash '包不完整 → 重新解压一份完整包（payload 目录必须跟脚本在一起）' }
@@ -1291,6 +1801,14 @@ function Install-WindowsFiles {
   } catch {
     Warn ('logs/state 目录建不出来: ' + $_.Exception.Message)
     Add-Action 'logs/state 目录没建成功：检查 C:\ProgramData\CMP40HXGen2 的权限后跑 -Mode Repair'
+  }
+  # 2026-10-10（用户要求）：移除"停 ACE"降级链 —— 清掉老版本留在 ProgramData 的两个文件（删不掉只提示，不致命）
+  foreach ($legacy in @('CMP40HXGen2.exe', 'AutoRetrain.cmd', 'CMP40HXGen2.exe.new', 'AutoRetrain.cmd.new')) {
+    $lp = Join-Path $script:ProgDataWin $legacy
+    if (Test-Path -LiteralPath $lp) {
+      try { Remove-Item -LiteralPath $lp -Force -ErrorAction Stop; Info ('已移除降级链遗留文件: ' + $legacy) }
+      catch { Warn ($legacy + ' 删不掉（可能正被占用）：' + $_.Exception.Message + ' —— 不影响功能，新开机流程不再用它') }
+    }
   }
   # RunPostBind.cmd：沿用已验证的逻辑，只把“驱动自愈源列表”换成这台机器的实际路径
   # （原编码原样写回：上游这份是 UTF-8，被当 GBK 读回写会把中文注释改坏）
@@ -1361,11 +1879,11 @@ function Install-WindowsFiles {
       Warn ('RunPostBind.cmd 写不进去: ' + $_.Exception.Message + ' —— 开机任务可能还是旧版；先手工结束 CMP40HXGen2.exe 再跑 -Mode Repair')
       Add-Action 'RunPostBind.cmd 没更新成功：跑 -Mode Repair 或手工结束 CMP40HXGen2.exe 后重装一次'
     }
-    Ok ('RunPostBind.cmd → ' + $script:ProgDataWin + '（首选新路径 + 旧 ACE 路径 fallback + 多源自愈 + 3 次重试）')
+    Ok ('RunPostBind.cmd → ' + $script:ProgDataWin + '（只走新路径 + 多源自愈；2026-10-10 起无停 ACE 降级链）')
   }
   $tnew = Join-Path $script:ProgDataWin '40hx-retrain-inpout.ps1'
   if (Test-Path $tnew) { Ok '40hx-retrain-inpout.ps1 就位 → 开机走新路径（inpoutx64 直写 MMIO，ACE-BOOT 全程不停）' }
-  else { Warn '40hx-retrain-inpout.ps1 没铺上 → 开机任务会回落到旧路径（每次开机停一次 ACE-BOOT）'; Add-Action '新路径工具缺失：重新解压完整包后跑一次 -Mode Repair' }
+  else { Warn '40hx-retrain-inpout.ps1 没铺上 → 开机任务这轮只能记日志（2026-10-10 起没有停 ACE 的降级链了）—— 必须 Repair 补上'; Add-Action '新路径工具缺失：重新解压完整包后跑一次 -Mode Repair' }
   Info ('自愈源: ' + $script:ProgDataDrv + ' , ' + $script:VendorDrvDir + ' , ESP \EFI\40HX\drv（兜底）')
   # 注意：不要把裸 .sys 再拷到包目录/C:\Temp 之类的非信任路径 —— 实测火绒会立刻报
   # Exploit/Vulndriver.ad 并删除文件（只有 System32\drivers、%ProgramData% 下那两处和 ESP 存活）
@@ -1428,6 +1946,16 @@ function Install-Efi {
     $tip = '① 必须是管理员窗口（一键安装.cmd 会自动提权）；② 手动敲 mountvol 看有没有卷被占用；③ BitLocker 开着会挂不上，先暂停；④ 虚拟机/WSL 里跑不了，要在真机 Windows 上跑'
     Fail $hint $script:ExitHash $tip
   }
+  # 2026-10-10（审查 A2）：先验 ESP 剩余空间（固件 590KB + 兜底驱动源约 400KB）—— 不够就别动手，
+  #   否则 Copy-Item 在 EAP=Stop 下抛异常，机器停在"已落 6 步改动"的半成品
+  try {
+    $drvInfo = New-Object System.IO.DriveInfo($espRoot)
+    $needBytes = [int64]($script:EfiSize + 400KB)
+    if ($drvInfo.AvailableFreeSpace -lt $needBytes) {
+      Fail ('ESP 剩余空间不足：剩 ' + [math]::Round($drvInfo.AvailableFreeSpace/1KB) + ' KB，需要约 ' + [math]::Round($needBytes/1KB) + ' KB') $script:ExitPrereq 'ESP 快满了（品牌机 100MB 小 ESP 堆了厂商文件时会发生）：进 ESP 删掉明显的厂商冗余/旧备份后重跑'
+    }
+    Ok ('ESP 剩余空间: ' + [math]::Round($drvInfo.AvailableFreeSpace/1MB, 1) + ' MB（够用）')
+  } catch { Warn ('ESP 剩余空间读不到（' + $_.Exception.Message + '）—— 跳过容量预检') }
   $srcEfi = Join-Path $script:PayloadDir 'EFI\40HXUNLK.EFI'
   if (-not (Test-Path $srcEfi)) { Fail ("载荷缺失: " + $srcEfi) $script:ExitHash '包的 payload\EFI 目录丢了（漏拷或杀软删）→ 重新解压一份完整包' }
   $srcHash = Get-FileSha256 $srcEfi
@@ -1467,6 +1995,7 @@ function Install-Efi {
     $newHash = Get-FileSha256 $dst
     if ($newHash -eq $srcHash) { Ok ("写入并回读校验通过: " + $dst) } else { Bad ("写入后哈希不符: " + $dst + " = " + $newHash) }
   }
+  $script:EspRootUsed = $script:EspRoot   # 2026-10-10（审查低-6）：快照 ESP 盘符，Dismount 会把它置空
   Dismount-Esp
 }
 
@@ -1490,12 +2019,30 @@ function Install-BootEntry {
     Warn '退化处理：设备路径节点沿用现有启动项的字节'
   }
 
+  # 2026-10-10（审查 B1）：Install-Efi 写固件的分区 与 启动项指向的分区必须是同一个 —— 不一致 = 固件找不到文件 = 静默不解锁
+  if ($script:EspRootUsed -and $espPart) {
+    $wroteGuid = Get-EspVolumeGuid $script:EspRootUsed
+    if ($wroteGuid -and $wroteGuid -ne ([string]$espPart.GuidText).ToLower()) {
+      Fail ('写固件的 ESP（' + $wroteGuid + '）与启动项将指向的分区（' + $espPart.GuidText + '）不是同一个') $script:ExitNvram '多盘机器的 ESP 定位分歧 —— 把本次 run-*.log 发给作者；临时办法：进 BIOS 手动选 40HX Unlock'
+    }
+  }
+
   $unlock = Get-UnlockBootEntry $entries
   $created = $false
   if ($unlock) {
     Ok ("已存在解锁启动项 " + $unlock.Name + " '" + $unlock.Entry.Description + "' → " + $unlock.FilePath + "（复用，不重复创建）")
     $name = $unlock.Name
     $index = $unlock.Index
+    # 2026-10-10（审查 B3）：复用也要验设备路径 —— ESP 重建/换盘/重分区后分区 GUID 会变，旧节点指向旧分区 = 静默不解锁
+    if ($node -and $unlock.Entry.DeviceNode -and ([Convert]::ToBase64String($unlock.Entry.DeviceNode) -ne [Convert]::ToBase64String($node))) {
+      Warn ('已存在的启动项设备路径与当前 ESP 分区不一致（ESP 被重建/换盘过）→ 原槽位重写')
+      $bytesFix = New-BootEntryBytes -DeviceNode $node -Description '40HX Unlock' -EfiPath '\EFI\40HX\40HXUNLK.EFI' -Attributes $attrs -OptionalData $null
+      [IO.File]::WriteAllBytes((Join-Path $BackupDir ($name + '.rewrite.bin')), $bytesFix)
+      if (-not (Write-FwVar $name $bytesFix)) { Fail ('重写 ' + $name + ' 失败') $script:ExitNvram '先关安全软件的启动项/UEFI 保护再跑' }
+      $rbFix = Read-FwVar $name
+      if (-not $rbFix -or [Convert]::ToBase64String($rbFix) -ne [Convert]::ToBase64String($bytesFix)) { Fail ('重写 ' + $name + ' 后回读不一致') $script:ExitNvram '进 BIOS 手动检查 40HX Unlock 启动项' }
+      Ok ('已重写启动项 ' + $name + '（设备路径已指向当前 ESP 分区，逐字节回读一致）')
+    }
   } else {
     $index = Get-FreeBootSlot $entries
     if ($index -lt 0) { Fail '没有空闲 Boot#### 槽位' $script:ExitNvram 'NVRAM 满了（少见）→ 进 BIOS 启动项里删掉几个没用的再跑' }
@@ -1560,7 +2107,7 @@ function Install-BootEntry {
     BootEntryCreated = $created
     BootMode        = $BootMode
     BootOrder       = (Format-BootOrderIndices (Get-BootOrderIndices))
-    EspRoot         = $script:EspRoot
+    EspRoot         = $script:EspRootUsed   # 2026-10-10：用快照值（$script:EspRoot 此时已被 Dismount 置空）
     PkgRoot         = $script:PkgRoot
     EfiSha256       = $script:EfiSha256
     EfiBackupName   = 'bootx64.efi.40hx.bak'
@@ -1588,7 +2135,9 @@ function Install-Task {
     $act = ($t.Actions | ForEach-Object { $_.Execute + ' ' + $_.Arguments }) -join ' '
     Info ('  动作: ' + $act)
     Info ('  触发器: ' + (($t.Triggers | ForEach-Object { $_.CimClass.CimClassName }) -join ', ') + ' ; 身份: ' + $t.Principal.UserId + '/' + $t.Principal.RunLevel)
-  } else { Bad '任务未注册成功' }
+  } else { Bad '任务未注册成功'
+    # 2026-10-10（用户现场联动排查）：写不上的常见原因给全 —— 杀软启动项保护拦计划任务、Task Scheduler 服务没跑
+    Add-Action '开机任务没注册上：① 杀软（火绒/360）的「启动项保护」会拦计划任务创建 → 先关掉或加信任；② services.msc 里 Task Scheduler 服务要在跑；处理后跑 -Mode Repair（或双击 一键修复Gen2.cmd 也会重建任务）' }
   # 2026-10-01：登录后 60 秒自动补跑一次（见 $script:TaskNameLogon 的注释）。
   # 为什么需要：开机那轮是最早的一批服务，客户机实测会因杀软拦驱动 / GPU 未就绪 / 驱动文件被清而失败，
   #   而用户登录后手动跑一次总是成功 —— 那就别让用户点，由系统自己补跑。
@@ -1598,7 +2147,7 @@ function Install-Task {
   }
   $out2 = (Invoke-Native { schtasks /create /tn $script:TaskNameLogon /sc onlogon /delay 0001:00 /ru SYSTEM /rl HIGHEST /tr $cmdLine /f 2>&1 } | Out-String)
   if ($out2 -match '成功|SUCCESS') { Ok ('登录后补跑任务已注册: ' + $script:TaskNameLogon + ' (LogonTrigger +60s, SYSTEM/Highest)') }
-  else { Warn ('登录后补跑任务注册可能失败: ' + $out2.Trim() + ' —— 需要它的话跑 -Mode Repair 重试') }
+  else { Warn ('登录后补跑任务注册可能失败: ' + $out2.Trim() + ' —— 同上两项（杀软启动项保护 / Task Scheduler 服务）；处理后跑 -Mode Repair 或双击 一键修复Gen2.cmd') }
   # 厂商自启（会在本机把算力清掉/覆盖 EFI）一律停掉
   # 2026-09-30 修：不再只认两个固定任务名（厂商换名就漏），改成按"名字或动作命令行里含 40HX"全扫
   $dis = 0
@@ -1728,7 +2277,7 @@ function Invoke-GspHealthCheck {
   # 2026-10-04 新增（用户要求：**按需触发**）：装完只在 GSP 没启用时才跑这一次体检。
   #   只读 = 不写系统；副作用只有"落一份报告"（桌面 + 包内 logs 各一份）。
   #   绝不改变安装结论：不动 $script:FailCount / $script:WarnCount / 退出码，异常一律 Info。
-  Head 'GSP 体检（只读，不写系统；报告落桌面）'
+  Head 'GSP 体检（只读：传 -NoFix，绝不写系统；报告落桌面）'
   $tool = Join-Path $script:PkgRoot '工具-测试与修复\查GSP.ps1'
   if (-not (Test-Path -LiteralPath $tool)) { Info '包内没有 工具-测试与修复\查GSP.ps1 → 跳过（不影响安装）'; return }
   $desk = [Environment]::GetFolderPath('Desktop')
@@ -1742,7 +2291,9 @@ function Invoke-GspHealthCheck {
   $tmpOut = Join-Path $env:TEMP ('gsp-check-out-' + [Guid]::NewGuid().ToString('N').Substring(0,8) + '.txt')
   $tmpErr = $tmpOut + '.err'
   try {
-    $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $tool + '"'),'-NoElevate','-OutFile',('"' + $out + '"'))
+    # 2026-10-08：查GSP.ps1 默认已改成"条件具备就自动写开关"，安装器这次体检必须是**只读**的
+    #   （承诺：不写系统、不改变安装结论）→ 显式传 -NoFix
+    $argList = @('-NoProfile','-ExecutionPolicy','Bypass','-File',('"' + $tool + '"'),'-NoElevate','-OutFile',('"' + $out + '"'),'-NoFix')
     $finished = $false
     $proc = $null
     # 2026-10-04（第 23 轮审查 中-1）：**抑制子进程 stdout/stderr** —— 报告只落桌面（+包内 logs），
@@ -1761,7 +2312,7 @@ function Invoke-GspHealthCheck {
       # 回退路径（某些宿主 -NoNewWindow 不可用）。2026-10-04（审查 低-1）：必须走 Invoke-Native ——
       #   本脚本硬规则：PS 5.1 下外部程序往 stderr 写字即使 2>&1|Out-Null 也会终止脚本；且此处是全包最后的保险，别绕过它。
       Info 'GSP 体检改用同步调用（Start-Process 不可用）'
-      try { Invoke-Native { & $psExe -NoProfile -ExecutionPolicy Bypass -File $tool -NoElevate -OutFile $out } | Out-Null } catch { }
+      try { Invoke-Native { & $psExe -NoProfile -ExecutionPolicy Bypass -File $tool -NoElevate -OutFile $out -NoFix } | Out-Null } catch { }   # 同上：体检必须只读
       $finished = $true
     }
     if (Test-Path -LiteralPath $out) {
@@ -2171,6 +2722,10 @@ function Invoke-Uninstall {
         } else {
           Warn ('BootOrder 没改成功 —— 顺序里可能还留着 ' + ('{0:X4}' -f $index) + '（重启后再跑一次卸载，或进 BIOS 删掉它）')
         }
+      } else {
+        # 2026-10-10（审查中-4）：BootOrder 只剩解锁项一个 → 过滤后为空；不写回空顺序（怕丢引导），如实提示
+        Warn ('BootOrder 里没有其它启动项可留 —— 不动 BootOrder；固件启动项照删，重启后进 BIOS 确认 Windows Boot Manager 是第一启动项')
+        Add-Action '卸载后请进 BIOS 确认启动顺序（本机 BootOrder 原本只有解锁项一个，脚本没动它）'
       }
       Remove-FwVar $name | Out-Null
       if (-not (Read-FwVar $name)) { Ok ('已删除固件启动项 ' + $name) } else { Warn ('固件启动项 ' + $name + ' 删不掉') }
@@ -2244,7 +2799,7 @@ Say ('#  包目录: ' + $script:PkgRoot) 'Cyan'
 Say ('#  时间  : ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '   管理员: ' + $isAdmin) 'Cyan'
 Say '################################################################'
 
-if (-not $isAdmin -and $Mode -ne 'Check') {
+if (-not $isAdmin -and $Mode -ne 'Check' -and $Mode -ne 'StorageDiag') {
   Fail '这个模式需要管理员权限：请右键“以管理员身份运行”一键安装.cmd（或 Start-Process powershell -Verb RunAs）' $script:ExitPrereq '双击 一键安装.cmd 会自动提权；直接右键 Install-40HXUnlock.ps1 →「使用 PowerShell 运行」不会提权'
 }
 
@@ -2256,6 +2811,12 @@ if ($Mode -eq 'Check') {
   else { Say ('体检完成：' + $script:FailCount + ' 项失败、' + $script:WarnCount + ' 条提示（见上面 [失败]/[提示]）。') $(if ($script:FailCount -eq 0) { 'Yellow' } else { 'Red' }) }
   Say ('日志: ' + $script:LogPath)
   # 2026-10-02（第三方审查）：Check 有失败项时不再返回 0（脚本化调用也能判失败）
+  if ($script:FailCount -gt 0) { Exit-With $script:ExitFail } else { Exit-With $script:ExitOk }
+}
+
+if ($Mode -eq 'StorageDiag') {
+  Invoke-StorageDiag
+  Say ('日志: ' + $script:LogPath)
   if ($script:FailCount -gt 0) { Exit-With $script:ExitFail } else { Exit-With $script:ExitOk }
 }
 
@@ -2311,12 +2872,38 @@ Head '计划'
 if ($Mode -eq 'Install') { Info '安装/修复：驱动+服务 → helper(含新路径工具) → 新路径驱动(inpoutx64) → 安全加固(目录权限 + 驱动源 base64) → GSP 开关 → 关快速启动 → ESP 固件 → 固件启动项 → 开机任务 → 厂商自启收尾' } else { Info 'Repair：只补驱动/服务/helper/新路径驱动/任务/安全加固，不动 ESP 与固件启动项' }
 
 $blockers = 0
-if ($rep.Firmware -ne 'Uefi') { Bad '固件不是 UEFI 模式'; $blockers++ }
-if ($rep.DiskStyle -ne 'GPT') { Bad ('系统盘不是 GPT（' + $rep.DiskStyle + '）'); $blockers++ }
+$espHardBlocked = $false   # 2026-10-10（审查 A6）：ESP 挂不上是硬门槛，-Force 也不能绕
+if ($rep.Firmware -eq 'Uefi') { }
+elseif ($rep.Firmware -eq '未知') {
+  # 2026-10-10（审查中-1）：Get-ComputerInfo 依赖 WMI，精简/装机版系统上会抛异常 → '未知'。
+  #   与 DiskStyle 同款处理：'未知' 不等于 Legacy 引导，降级为提示；真读出非 UEFI 才是硬门槛。
+  Warn '固件类型读不到（未知）—— 不等于 Legacy 引导；本次先继续（后面 ESP/固件启动项会再核一遍）'
+  Add-Action '固件类型读不到：若装完开机没进 40HX Unlock，先进 BIOS 确认是 UEFI 引导（关 CSM）'
+}
+else { Bad ('固件不是 UEFI 模式（' + $rep.Firmware + '）'); $blockers++ }
+# 2026-10-08：只有「真读出 MBR」才算硬门槛；读不到（未知）降级为提示 —— 客户机实测 diskpart 里全是 GPT，
+#   只是 Storage 接口坏了，旧版会把这种机器直接挡在门外。但**挂不上 ESP 的机器**（真 MBR / 非 UEFI 引导）
+#   仍然必须在动手改任何东西之前停住（DSH 审查 Q4：否则会先落 6 步改动、到 ESP 那步才失败，留半成品）。
+if ($rep.DiskStyle -eq 'MBR' -and $rep.DiskStyleConfirmed) { Bad '系统盘不是 GPT（MBR）'; $blockers++ }
+elseif ($rep.DiskStyle -ne 'GPT') {
+  Warn ('系统盘分区样式读不到（' + $rep.DiskStyle + '）—— 不等于 MBR 盘；本次先继续（后面的 ESP/固件启动项会再核一遍）')
+  Info ('判定来源: ' + $(if ($rep.DiskStyleSource) { $rep.DiskStyleSource } else { '所有后端都失败（逐条见下）' }))
+  Show-StorageDiag
+  Add-Action '系统盘分区样式读不到：把上面的「存储信息诊断」和本次 run-*.log 发给作者（原因就在里面）'
+  if (Test-EspPrecheckBlocked $rep) {
+    # 2026-10-08（DSH 第二轮审查）：措辞收敛 —— 只读预检能证明"挂不上 ESP"，但挂不上的原因可能是
+    #   ① 真 MBR/BIOS 引导，也可能是 ② ESP 被安全软件/已有挂载点挡着。不要断言成 ①。
+    Bad '取不到 EFI 系统分区（ESP）—— 引导模式或 ESP 挂载有问题，本次**还没有做任何改动**'
+    $blockers++
+    $espHardBlocked = $true
+    Add-Action '先分两条查：① 这台机器是不是 UEFI+GPT 引导（真 MBR 盘双击 工具-测试与修复\MBR转GPT.cmd（微软 mbr2gpt 的安全包装，先校验后转换），并在 BIOS 关 CSM；盘里没数据的话直接重装成 GPT 更快）；② ESP 是不是被安全软件/别的东西占着挂不上（管理员下手动 mountvol Y: /S 试，或双击 工具-测试与修复\存储体检.cmd 取证）'
+  }
+}
 if ($rep.SecureBoot -eq $true) { Bad 'Secure Boot 开着'; $blockers++ }
 if ($rep.BitLocker -match 'On|1') { Bad 'BitLocker 开着（会索要恢复密钥）'; $blockers++ }
 if ($rep.Target.Count -eq 0) { Bad '没找到 CMP 40HX (DEV_1F0B)'; $blockers++ }
 if ($blockers -gt 0) {
+  if ($Force -and $espHardBlocked) { Fail ('ESP 挂不上属于硬门槛，-Force 不能绕过（继续也装不上，只会留半成品）') $script:ExitPrereq '按上面的待办先解决 ESP 挂载（杀软占用 / 引导模式），再重跑' }
   if ($Force) { Warn ('有 ' + $blockers + ' 项前提不满足，但 -Force 已指定 → 继续') }
   else { Fail ('有 ' + $blockers + ' 项前提不满足，先处理后重跑；确认要继续就加 -Force') $script:ExitPrereq '按上面 [失败] 行逐条处理：Secure Boot→BIOS 关；BitLocker→暂停/解密；MBR 盘→mbr2gpt；显卡没识别→插紧/装 NVIDIA 驱动；不是 UEFI→BIOS 关 CSM' }
 }
@@ -2331,7 +2918,7 @@ Info '  5. 驱动源形态    ：ProgramData 两处的裸 .sys/.dll 转成 base6
 Info '  6. Install 还有  ：把解锁固件写进 ESP（\EFI\40HX\40HXUNLK.EFI）+ 写固件启动项 Boot####/BootOrder（默认**不改** Windows 的 \EFI\Boot\bootx64.efi）'
 Info '已知风险与恢复：'
 Info '  · 改引导（只有 Install 会） 最坏=写坏启动顺序 → 进 BIOS 把启动项切回 Windows Boot Manager（本包默认不碰 Windows 的 bootx64.efi，所以进系统这条路一直在）'
-Info '  · ACE-BOOT（腾讯反作弊）  只在必要时停、结束就恢复；若客户点过"退出预启动模式"，恢复可能让桌面起不来 → 跑 工具-测试与修复\桌面恢复.cmd（没桌面也能跑）'
+Info '  · ACE-BOOT（腾讯反作弊）  2026-10-10 起全程不再停（降级链已移除）；老版本若曾把 ACE 停住没恢复 → 跑 工具-测试与修复\桌面恢复.cmd（没桌面也能跑）'
 Info '  · 驱动被杀软隔离（火绒/360）  症状=Gen2 落不了地、算力不受影响 → 把 README 1.1 的路径加信任区后跑 -Mode Repair'
 Info '  · 显卡被复位  本包 Gen2AutoHard=0 / Gen2PnpFallback=0，绝不复位显卡；万一出现代码 43 → 完全关机（不是重启）再开机'
 Info '  · 目录权限/驱动源改动  零功能影响；要退回双击 工具-测试与修复\回滚-安全加固.cmd'
@@ -2347,6 +2934,36 @@ Install-Hardening
 Install-Gsp
 Install-Power
 if ($Mode -eq 'Install') {
+  # 2026-10-11：批次预检（只读）。认出锁死批次 → 明确提示 + 客户选择；强制安装连 EFI 一起装，但告知 43 风险与自救办法
+  $bv = Get-BatchVerdict
+  if ($bv.Verdict -eq 'unlockable') {
+    Info '批次预检：可解锁批次（含本次开机已解锁）'
+  } elseif ($bv.Verdict -eq 'unknown') {
+    Warn '批次预检：没见过的批次形态（可能解锁失败）—— 按原流程继续安装；失败可 -Mode Uninstall -Yes 还原'
+  } else {
+    Head '批次预检：已知锁死批次'
+    Say '  这张卡的批次（POST 寄存器形态 SS0=0x20000010）实测：算力解不了，Gen2 目前也解不了。' 'Red'
+    Say '  装上后每次开机都会跑一遍解锁固件并失败，失败过程可能把卡留在异常状态，' 'Yellow'
+    Say '  Windows 里表现为 设备管理器代码43（显卡叹号 / 开机黑屏一阵）。' 'Yellow'
+    Say ''
+    Say '  [1] 退出不装（推荐）—— 不动 EFI/启动项/开机任务，卡保持原样可用' 'Green'
+    Say '  [2] 强制安装（含 EFI 启动项）—— 适合：准备刷 VBIOS 试救 / 就想试试' 'Yellow'
+    Say '      强制安装后如果开机（40HX 跑码）出现代码43，两种自救：' 'Yellow'
+    Say '        a) 跑 一键卸载.cmd 还原；或' 'Yellow'
+    Say '        b) 进 BIOS 把 Windows Boot Manager 调回第一启动项（40HX 项不跑就没有43），' 'Yellow'
+    Say '           Windows 侧的 Gen2 解锁工具照常工作（只解 Gen2，不解算力）。' 'Yellow'
+    $choice = ''
+    if ($ForceLockedBatch) { $choice = '2'; Info '（-ForceLockedBatch：按强制安装处理）' }
+    else { $choice = Read-Host '  选择 [1/2]（直接回车 = 1 退出）' }
+    if ($choice -ne '2') {
+      Say '  已按选择退出：未安装 EFI 固件/启动项/开机任务，开机时不会有任何本包动作。' 'Green'
+      Dismount-Esp
+      Info '  （GSP 开关与快速启动两项已按标准流程调整，无害且可随卸载还原；ESP 的 \EFI\40HX\drv 与已拷贝驱动文件都是不会被加载的静态文件，想彻底清理：-Mode Uninstall -Yes）'
+      Exit-With 6
+    }
+    Warn '按客户选择强制安装（锁死批次，43 风险与自救已告知）'
+    Add-Action '本机是锁死批次：若开机（40HX 跑码）出现代码43 → 跑 一键卸载.cmd，或进 BIOS 把 Windows Boot Manager 调回第一启动项（40HX 项不跑就没有43，Windows 侧 Gen2 工具照常工作）'
+  }
   Install-Efi -BackupDir $bk
   Install-BootEntry -BackupDir $bk -BootMode $BootMode
 } else { Info 'Repair 模式：跳过 ESP 固件与固件启动项' }

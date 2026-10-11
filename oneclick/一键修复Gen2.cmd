@@ -1,4 +1,6 @@
 @echo off
+rem Copyright 2026 nie2100 - All rights reserved; redistribution or resale not permitted.
+rem Upstream MIT parts: CMP40HX-Unlock by PZH1gdmu / CMP40HX-Unlock-OnlyEFI by BardKing-CN.
 chcp 936 >nul
 title 40HX 一键修复 PCIe Gen2
 cd /d "%~dp0"
@@ -21,7 +23,7 @@ if %RC% NEQ 0 (
   echo.
   echo [OK] 修复脚本跑完了 ^(退出码 0^)：结果与日志已存到桌面, 需要时发给技术即可
 )
-if not "%NO_PAUSE%"=="1" pause >nul
+if not "%NO_PAUSE%"=="1" pause
 rem 2026-10-02（第三方审查）：退出码要传出去 —— 否则自动化/批处理看到恒 0，把"没修好"当成功
 exit /b %RC%
 
@@ -36,6 +38,6 @@ echo     3. 包别放在映射网络盘或共享目录上，拷到本机硬盘（如 D:\40hx）
 echo   当前目录（可截图发回）
 echo      "%~dp0"
 echo ============================================================
-if not "%NO_PAUSE%"=="1" pause >nul
+if not "%NO_PAUSE%"=="1" pause
 exit /b 1
 

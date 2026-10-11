@@ -1,7 +1,12 @@
 @echo off
+rem Copyright 2026 nie2100 - All rights reserved; redistribution or resale not permitted.
+rem Upstream MIT parts: CMP40HX-Unlock by PZH1gdmu / CMP40HX-Unlock-OnlyEFI by BardKing-CN.
 chcp 936 >nul 2>&1
 title 40HX ╫БкЬв╢л╛╪Л╡И
 setlocal
+rem 2026-10-10ё╗иС╡И╣м-2ё╘ё╨ж╩╤алЕ╪Л╡╩пХр╙╧эюМт╠ё╛╣╚╡©╥жпч╦╢╫╗рИё╗хГ nvidia-smi -dm 0ё╘пХр╙ё╛охиЫцВ
+fltmc >nul 2>&1
+if errorlevel 1 echo     [лАй╬] ╣╠г╟╡╩йг╧эюМт╠иМ╥щткппё╨лЕ╪ЛууЁёё╛╣╚хТ╫Абш╫╗рИдЦж╢пппч╦╢цЭаНё╛гКохсц╧эюМт╠иМ╥щ╢Р©╙ cmd
 
 set "SMI=C:\Windows\System32\nvidia-smi.exe"
 set "TMPQ=%TEMP%\40hx_q.csv"
@@ -36,6 +41,10 @@ set "EARLY="
 set "TASKV="
 set "TMPT=%TEMP%\40hx_task.stat"
 set "TMPCL=%TEMP%\40hx_check.lst"
+set "TMPG=%TEMP%\40hx_gsp.txt"
+set "TMPG2=%TEMP%\40hx_gsp_v.txt"
+set "TMPG3=%TEMP%\40hx_c43.txt"
+set "TMPW=%TEMP%\40hx_width.txt"
 
 echo ============================================================
 echo                 40HX ╫БкЬв╢л╛╪Л╡И
@@ -51,6 +60,8 @@ if not exist "%SMI%" (
 
 "%SMI%" --query-gpu=name,driver_version,memory.total,temperature.gpu,power.draw,power.limit,driver_model.current,driver_model.pending,pcie.link.width.current,pcie.link.width.max --format=csv > "%TMPQ%" 2>nul
 if not exist "%TMPQ%" goto :nosmi
+rem 2026-10-10ё╗иС╡И╣м-1ё╘ё╨> жь╤╗оРтзцЭаНй╖╟эй╠р╡╩А╫╗ 0 вж╫знд╪Чё╛лЕ╩Щн╙ 0 м╛яЫ╟╢нчйДЁЖ╢╕юМ
+for %%A in ("%TMPQ%") do if "%%~zA"=="0" goto :nosmi
 rem 2026-10-02 пч BUGё╨уБюОртг╟п╢Ёи in ("%TMPQ%") ║╙║╙ ╢ЬрЩ╨е╣д╣╔╦Ж token ╩А╠╩ for /f ╣╠Ёи**вж╥Ш╢╝**
 rem   ╤Ь╡╩йгнд╪ЧцШё╗еД╨о skip=1 ╬мр╩пп╤╪╡╩╫БнЖё╘ё╛╫А╧Ш GPU/гЩ╤╞/а╢б╥©М╤хх╚йг©уж╣ ║З ╫Абшсют╤"╢ФтзрЛЁё"║ё
 rem   уЩх╥п╢╥╗ = usebackq + рЩ╨её╗╪хдэ╣╠нд╪Ч╤аё╛сждэхщхлб╥╬╤юОсп©у╦Яё╘║ё
@@ -80,6 +91,36 @@ if /I "%DRV%"=="N/A" set "OK1=0"
 if /I "%DRV%"=="[N/A]" set "OK1=0"
 if "%OK1%"=="1" echo     [OK] от©╗сКгЩ╤╞ряй╤╠П
 if "%OK1%"=="0" echo     [!!] иоцФпм╨е/гЩ╤╞╟Ф╠╬йг©у╣д╩Рйг N/A: nvidia-smi ц╩╤а╣╫©╗, ╩РгЩ╤╞рЛЁё
+
+rem 2026-10-10ё╗сц╩╖р╙гСё╘ё╨GSP ╧л╪Чв╢л╛лА╣╫уБюО╡И ║╙║╙ GSP ╧ьве + ╢ЗбК 43 й╠от©╗ря╠╩гЩ╤╞мёсцё╛
+rem   ╨СцФ╣д╢Ь©М/кЦа╕й╣╡Бв╒╤╗й╖╟эё╗CUDA ЁУй╪╩╞╡╩акё╘ё╛х╥уО╬мж╠╫слЬ╫АбшгЬё╛╡╩╟веэр╡╡╩оехк║ё
+set "GSPK=2"
+set "GSPV="
+if exist "%TMPG2%" del "%TMPG2%" >nul 2>&1
+"%SMI%" -q > "%TMPG%" 2>nul
+if exist "%TMPG%" powershell -NoProfile -Command "$q=[IO.File]::ReadAllText('%TMPG%');$m=[regex]::Match($q,'(?im)^\s*GSP Firmware Version\s*:\s*(.+?)\s*$');if(-not $m.Success){'UNKNOWN'}else{$v=$m.Groups[1].Value.Trim();if($v -match '^\d+(\.\d+)+'){'ON '+$v}else{'OFF '+$v}}" > "%TMPG2%" 2>nul
+if exist "%TMPG2%" for /f "usebackq delims=" %%a in ("%TMPG2%") do set "GSPV=%%a"
+if defined GSPV if "%GSPV:~0,2%"=="ON" set "GSPK=1"
+if defined GSPV if "%GSPV:~0,3%"=="OFF" set "GSPK=0"
+if "%GSPK%"=="1" echo     [OK] GSP ╧л╪Ч  : ряфТсц (%GSPV:~3%)
+if not defined GSPV echo     [--] GSP ╧л╪Ч  : ц╩дэеп╤╗ё╗nvidia-smi -q ╠╩ю╧?ё╘-- ╡╩с╟оЛобцФ╣дй╣╡Б
+if defined GSPV if "%GSPV:~0,7%"=="UNKNOWN" echo     [--] GSP ╧л╪Ч  : nvidia-smi -q юОц╩сп GSP ппё╗гЩ╤╞л╚юо?ё╘-- ╡╩с╟оЛобцФ╣дй╣╡Б
+if not "%GSPK%"=="0" goto :gsp_ok
+echo     [!!] GSP ╧л╪Ч  : н╢фТсц (%GSPV:~4%) -- ╫БкЬ╨С nvlddmkm хо╡╩ак©╗ = ╨зфа + иХ╠╦╧эюМфВ╢ЗбК 43
+echo            ╢╕юМ: к╚╩В GSPлЕ╪Л.cmd вт╤╞пч, х╩╨С║╬мЙх╚╧ь╩З║©ё╗╡╩йгжьфТё╘ты©╙╩З
+rem GSP ц╩©╙й╠ты©╢р╩яшйг╡╩йгря╬╜╢ЗбК 43 акё╨йг ║З лЬ╧Щ [2/6]~[4/6] й╣╡Б
+set "C43="
+if exist "%TMPG3%" del "%TMPG3%" >nul 2>&1
+powershell -NoProfile -Command "$d=Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue | Where-Object { $_.FriendlyName -match '40HX' -or $_.InstanceId -match 'DEV_1F0B' } | Select-Object -First 1; if($d){$pc=(Get-PnpDeviceProperty -InstanceId $d.InstanceId -KeyName 'DEVPKEY_Device_ProblemCode' -ErrorAction SilentlyContinue).Data; if($pc -eq 43){'C43'}else{'OK'}}else{'NODEV'}" > "%TMPG3%" 2>nul
+if exist "%TMPG3%" for /f "usebackq delims=" %%a in ("%TMPG3%") do set "C43=%%a"
+if not "%C43%"=="C43" goto :gsp_ok
+echo     [!!] от©╗╣╠г╟╬мйг╢ЗбК 43ё╗гЩ╤╞мёсцакуБуе©╗ё╘-- [2/6]~[4/6] ╣дй╣╡БлЬ╧Щё╗╡Бакр╡╠ь╟эё╘
+echo            кЁпР: охпч GSPё╗╪ШиоцФё╘ё╛мЙх╚╧ь╩Зты©╙╩Зё╛тыеэ╠╬╫е╠╬╦╢╨к
+set "OK2=2"
+set "OK3=2"
+set "OK4=2"
+goto :gen2info
+:gsp_ok
 echo.
 
 echo [2/6] гЩ╤╞дёй╫   (WDDM = WSL ж╠м╗©исц)
@@ -364,6 +405,7 @@ if not defined D2HT set "D2HT=й╖╟э"
 echo     H2D ╢Ь©М : %H2DT% GB/s
 echo     D2H ╢Ь©М : %D2HT% GB/s
 echo     ╡н©╪ж╣   : Gen1 т╪ 3.1-3.4 / Gen2 т╪ 5.8-6.7 GB/s
+echo                ё╗©М╤х╡╩йг x16 й╠╟╢╠хюЩушкЦ: Gen2 x8 т╪ 3.0-3.4, сК Gen1 x16 жь╣Ч ║╙║╙ ©╢обцФ©М╤хеп╤╗ё╘
 if /I "%VERD%"=="GEN2" set "OKLINK=1"
 if /I "%VERD%"=="GEN2" echo     [OK] еп╤╗: Gen2 ря╫БкЬ
 if /I "%VERD%"=="GEN1" echo     [!!] еп╤╗: Gen1 н╢╫БкЬ
@@ -377,6 +419,31 @@ if not defined VERD if exist "%TMPO%" (
   echo     ---- й╣╡БЁлпРт╜й╪йДЁЖё╗╤╗н╩╦ЫрРсцё╘----
   type "%TMPO%"
   echo     --------------------------------------
+)
+
+rem 2026-10-10ё╗©м╩╖ожЁ║ё╘ё╨©М╤хеп╤а ║╙║╙ ц╩╡╧╣Гхщ╣д©╗╣ГфЬиоочж╩сп x8ё╩спп╘жВ╟ЕнОюМ x16 ╡ш╣ГфЬж╩сп x4/x8║ё
+rem   Gen2 x8 ║ж 3.0-3.4 GB/s сК Gen1 x16 ╣д 3.1-3.4 жь╣Ч ║З вэ╢Ь©М╥ж╡╩гЕё╛╟╢"ц©м╗╣ю╢Ь©М"(H2D/©М╤х)╦╢епё╨
+rem   ц©м╗╣ю╡╩╣мсз 0.34 GB/s = Gen2 кыбй║ё
+set "WSTAT="
+set "WLANE="
+if exist "%TMPW%" del "%TMPW%" >nul 2>&1
+powershell -NoProfile -Command "$c=0;$m=0;$h=0.0;[void][int]::TryParse('%LWC%',[ref]$c);[void][int]::TryParse('%LWM%',[ref]$m);[void][double]::TryParse('%H2DT%',[System.Globalization.NumberStyles]::Float,[System.Globalization.CultureInfo]::InvariantCulture,[ref]$h);$o='UNK';if($m -gt 0){if($m -lt 16){$o='MAXLOW'}elseif($c -lt $m){$o='CURLOW'}else{$o='FULL'}};$lane='NA';if($h -gt 0 -and $c -gt 0){if($h/$c -ge 0.34){$lane='G2'}else{$lane='G1'}};$o+'|'+$lane+'|'+$c+'|'+$m" > "%TMPW%" 2>nul
+if exist "%TMPW%" for /f "usebackq tokens=1-4 delims=|" %%a in ("%TMPW%") do (set "WSTAT=%%a" & set "WLANE=%%b")
+if "%WSTAT%"=="FULL" echo     [OK] а╢б╥©М╤х x%LWC% х╚бЗ
+if not "%WSTAT%"=="MAXLOW" goto :w_notmaxlow
+echo     [!!] ╦ц╡ш/╦ц©╗╣ГфЬиоочж╩сп x%LWM%ё╗в╒рБ: нОюМ x16 ╡╩╣хсз╣ГфЬ x16ё╘
+echo            а╫жж©идэ: ╒ы©╗ц╩╡╧╣Гхщё╗40HX р╙╡╧╣Гхщ╡есп x16 ╣ГфЬё╘╒з╡Е╢М╡шё╗жВ╟ЕуБлУ╡ш╣ГфЬж╩сп x%LWM%ё╘
+echo            ╢╕юМ: мЙх╚╧ь╩З╨С╩╩жВ╟Е║╬╣зр╩лУ║©x16 ╡шты╡Бё╩╩╧йг x%LWM% ╬мйг©╗ц╩╡╧╣Гхщ
+echo            ё╗ж╩с╟оЛ╢Ь©М╡╩с╟оЛкЦа╕: Gen2 x8 ╢Ь©Миоочт╪ 3.3 GB/s, ╣╫╡╩ак x16 ╣д 5.8+ё╘
+:w_notmaxlow
+if not "%WSTAT%"=="CURLOW" goto :w_notcurlow
+echo     [!!] а╢б╥ж╩п╜ил╣╫ x%LWC%ё╗╡шн╩иооч x%LWM%ё╘║╙║╙ ц╩╡Е╫Т/╫Пйжж╦тЮ╬с╤Ю
+echo            ╢╕юМ: мЙх╚╧ь╩З╨Сжь╡Еот©╗ё╗оПф╓╡ар╩об╫Пйжж╦ё╘ё╛╡╩пп╩╩╡ш
+:w_notcurlow
+rem ©М╤х╡╩╧╩й╠вэ╢Ь©М╣м║ыц╩╫БкЬё╨Gen1 еп╤╗р╙╟╢ц©м╗╣ю╢Ь©М╦╢╨к
+if /I "%VERD%"=="GEN1" if "%WLANE%"=="G2" (
+  echo     [к╣цВ] ╟╢ц©м╗╣ю╢Ь©МкЦфДй╣йг Gen2 x%LWC%ё╗©М╤хйэоч╟явэ╢Ь©Мю╜╣макё╘║╙║╙ ╡╩йгц╩╫БкЬ, ╟╢╩фи╚"©М╤хйэоч"╪ф
+  set "OK3=2"
 )
 echo.
 
@@ -427,8 +494,8 @@ goto :gen2info
 :buildfail
 set "NOCSC=1"
 echo     [лЬ╧Щ] дзжцй╣╡БЁлпРц╩дэеэфПю╢ ^(╫Бя╧/╠ЮрК/ткппй╖╟э^), кЦа╕/╢Ь©Мй╣╡БвЖ╡╩ак
-echo            ^(уБ╡╩йгот©╗╧йуо^) ╤Юн╙╟╡х╚хМ╪Чю╧╫ь %TEMP% об╣дожЁ║╠ЮрКсКткпп;
-echo            ╟я %TEMP% ╪схКи╠хМпехнгЬ╨Сжьеэ╪╢©и, ╡╩╠ьжьв╟╠╬╧╓╬ъ
+echo            ^(уБ╡╩йгот©╗╧йуо^) ╤Юн╙╟╡х╚хМ╪Чю╧╫ь "%TEMP%" об╣дожЁ║╠ЮрКсКткпп;
+echo            ╟я "%TEMP%" ╪схКи╠хМпехнгЬ╨Сжьеэ╪╢©и, ╡╩╠ьжьв╟╠╬╧╓╬ъ
 rem 2026-10-04 ╦╢╪Л LOW-1: й╖╟э©идэ╥╒иЗтз╫Бя╧/╠ЮрК/ткппхЩ╤нжп╣дхн╨нр╩╤н, а╫╤нхуж╬╦ВвтЁи©Р, ╡╩ЁЖож©у©Р║ё
 if exist "%TMPC%" (
   echo     ---- ╠ЮрКфВйДЁЖ ----
@@ -453,11 +520,17 @@ if exist "%LOGP%" (
 rem 2026-10-06ё╨уБр╩оНртг╟ж╩лЫхуж╬║╒╡╩╫Ь╫Абш ║╙║╙ сзйг"хуж╬юОйгиор╩╢н©╙╩З╣д PASS"р╡дэеДио"х╚бл"║ё
 rem   ожтз╟╢а╫лУепё╨╒ыхуж╬йг╡╩йг╠╬╢н©╙╩Зп╢╣дё╗LastWriteTime > LastBootUpTimeё╘╒звН╨Ср╩бжйг╡╩йг
 rem   EXIT=0 гр╢Ь PASS пп║ё╦у©╙╩З 3 ╥жжсдз╩╧ц╩бДхуж╬╣дкЦ"н╢й╣╡Б"ё╛╡╩т╘мВкЭ║ё
+rem   2026-10-08ё╗©м╩╖╩Зй╣╡Бё╘ё╨©╙╩З╨С**а╒©л**еэ╠╬╫е╠╬╩╧╩А╡х╣╫"╠╬бжря start║╒╩╧ц╩бД EXIT пп" ║╙║╙ т╜ю╢уБжжр╡еп FAIL(╨Л)ё╛
+rem   ©м╩╖ртн╙©╙╩ЗхннЯ╩╣акё╗фДй╣йгдгр╩бжр╙ 1~3 ╥жжсё╘║ёожтз╤Юр╩╦Ж RUN ╫Абшё╨хуж╬тз 4 ╥жжсдз╦у╦Эпб╧Щ║╒╠╬бжсжц╩сп EXIT пп
+rem   = хннЯ╩╧тзеэё╗╩ф/н╢й╣╡Бё╘ё╩Ё╛╧Щ 4 ╥жжс╩╧ц╩ EXIT пп = уФ╣дц╩еэЁиё╗╨Лё╘║ё
+rem   2026-10-08ё╗иС╡И Q1ё╛жпнёё╘ё╨FAIL: р╡кЦ"╠╬бжря╬╜ЁЖ╫Абш" ║╙║╙ кЭж╩тзй╖╟э╥жж╖п╢
+rem   ё╗payload\windows\RunPostBind.cmd юО RC!=0 ╡е echo FAIL:ё╘ё╛╠╬╩З 36 бжхуж╬юОЁЖож 0 ╢н║ё
+rem   ╡╩уБц╢йу╣д╩╟ё╛"ря╢Р FAIL: ╣╚╫ЬЁл╠╩и╠ц╩бД EXIT"╣дбж╢н╩А╠╩╣╠╩ф(н╢й╣╡Б)ё╛╣хсз╟яуФй╖╟э╡ьфПю╢║ё
 rem   еп╤╗сц PowerShell р╩╢нпт╦Ь╫Абшё╨цЭаНппюОж╩сц╣╔рЩ╨е║╒╡╩ф╢жпндб╥╬╤/╡нйЩё╗цБ╣ц╢ЗбКрЁ╟я╡нйЩ╦Ц╩╣ё╘║ё
 set "OK5=0"
 rem м╛р╩╦Ж %TMPT% ╩А╠╩иор╩╢нткппаТоб ║╙║╙ охи╬╣Т, цБ╣цдцио╢н╣д╫Абш╣╠╠╬╢н╣дё╗╠╬╩Зй╣╡Б╡х╣╫╧Щё╘
 if exist "%TMPT%" del "%TMPT%" >nul 2>&1
-if exist "%LOGP%" powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%LOGP%';$bt=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime;$f=Get-Item -LiteralPath $p;$t=[IO.File]::ReadAllText($p);$i=$t.LastIndexOf('PostBind start');$ok=$false;if($i -ge 0){$tail=$t.Substring($i);if(($tail -match 'EXIT=0') -and ($tail -match 'PASS: Gen2 reached on the new path')){$ok=$true}};if($f.LastWriteTime -gt $bt){if($ok){'OK'}else{'FAIL'}}else{if(((Get-Date)-$bt).TotalMinutes -lt 3){'WAIT'}else{'STALE'}}" > "%TMPT%" 2>nul
+if exist "%LOGP%" powershell -NoProfile -ExecutionPolicy Bypass -Command "$p='%LOGP%';$bt=(Get-CimInstance Win32_OperatingSystem).LastBootUpTime;$f=Get-Item -LiteralPath $p;$t=[IO.File]::ReadAllText($p);$i=$t.LastIndexOf('PostBind start');$ok=$false;$done=$false;if($i -ge 0){$tail=$t.Substring($i);$done=(($tail -match 'PostBind EXIT') -or ($tail -match 'FAIL:'));if(($tail -match 'EXIT=0') -and ($tail -match 'PASS: Gen2 reached on the new path')){$ok=$true}};if($f.LastWriteTime -gt $bt){if($ok){'OK'}elseif((-not $done) -and (((Get-Date)-$f.LastWriteTime).TotalMinutes -lt 4)){'RUN'}else{'FAIL'}}else{if(((Get-Date)-$bt).TotalMinutes -lt 3){'WAIT'}else{'STALE'}}" > "%TMPT%" 2>nul
 if exist "%TMPT%" for /f "usebackq delims=" %%a in ("%TMPT%") do set "TASKV=%%a"
 if "%TASKV%"=="OK" set "OK5=1"
 if "%TASKV%"=="OK" echo     [OK] ╠╬╢н©╙╩З╣дхннЯеэ╧Щ: вН╨Ср╩бж EXIT=0 + PASS
@@ -465,6 +538,8 @@ if "%TASKV%"=="FAIL" echo     [!!] вН╫Э╣дхуж╬бж╢нц╩сп EXIT=0 + PASS: ©╙╩ЗхннЯц╩е
 if "%TASKV%"=="STALE" echo     [!!] хуж╬╩╧мётз"иор╩╢н©╙╩З": ╠╬╢н©╙╩З╣дхннЯц╩еэЁи
 if "%TASKV%"=="WAIT" set "OK5=2"
 if "%TASKV%"=="WAIT" echo     [--] ╠╬╢н©╙╩З╣дхуж╬╩╧ц╩бДобю╢(хннЯтз╫ЬвюцФ╨Ст╪ 1 ╥жжсдзеэ, ит╨Сжьеэ╠╬╫е╠╬)
+if "%TASKV%"=="RUN" set "OK5=2"
+if "%TASKV%"=="RUN" echo     [--] ╠╬╢н©╙╩З╣дхннЯ╠╬бж**╩╧тзеэ**(хуж╬ря start, ╩╧ц╩бД EXIT пп) -- ╣х 2~3 ╥жжстыеэ╠╬╫е╠╬
 if not exist "%LOGP%" echo     [!!] ц╩сп©╙╩ЗхннЯхуж╬: ©идэц╩в╟©╙╩ЗхннЯ(╪Ш ее╡Иж╦рЩ ╣з 5 ╫з)
 if not defined TASKV if exist "%LOGP%" echo     [!!] ц╩дэеп╤╗: PowerShell ц╩╦ЬЁЖ╫А╧Ш(╠╩ю╧╩Р╠╬╩Зц╩сп PowerShell)
 rem 2026-10-06ё╗иС╡И r1 жпнёё╘ё╨TASKV ©у = "╡Б╡╩Ёи", ╡╩йг"н╢╧Щ" ║╙║╙ ╪фн╙н╢й╣╡Б(2)ё╛╠П╠╗Ёи╪ы╨Л
@@ -481,15 +556,16 @@ rem 2026-10-01bё╗иС╡И H17ё╘ё╨т╜ю╢а╫пп╥ж©╙п╢ё╛хуж╬╡╩╢Фтзй╠ errorlevel яьсциор╩лУц
 rem   ║З ╩А╠╩нСепЁи"Ё╖ил╧╓╬ъ╠╗╧Щ PASS"║ё╟Э╫Ь if exist ©И╨С╬м╡╩╩Аак║ё
 if exist "%STAT%" (
   powershell -NoProfile -Command "$c = Get-Content '%STAT%' -Encoding UTF8; Write-Output ('    written: ' + (Get-Item '%STAT%').LastWriteTime); $c -replace ([char]0x2705),'[OK]' -replace ([char]0x274C),'[NG]' -replace ([char]0x2713),'v' -replace ([char]0x26A0),'!' -replace ([char]0xFE0F),''"
+  rem 2026-10-06ё╨уБр╩оНйгЁ╖ил╧╓╬ъаТоб╣днд╪Ч, ╠╬╟Э╡╩въкЭ ║╙║╙ цВх╥╠Й"╡н©╪", ╡╩╪фхК╫Абш
+  echo     [╡н©╪] иоцФйгЁ╖ил╧╓╬ъ╣дв╢л╛нд╪Ч, ╠╬╟Э╡╩сцкЭ: ╧Щфз╩Рдзхщ╬и╤╪╡╩кЦрЛЁё
+  if defined NPASS (
+    echo.
+    echo     [к╣цВ] иоцФуБ╥щйг**Ё╖ил╧╓╬ъ**╣дв╢л╛нд╪Ч; ╠╬╟Эвъпбб╥╬╤ ^(ECAM+inpoutx64, ╡╩пХр╙ ThrottleStop^),
+    echo            кЭ╠╗"ThrottleStop гЩ╤╞н╢ткпп"йТуЩЁёожоС, гКрт [5/6] ╣д PASS н╙в╪
+  )
 ) else (
-  echo     [--] н╢ур╣╫ %STAT%
-)
-rem 2026-10-06ё╨уБр╩оНйгЁ╖ил╧╓╬ъаТоб╣днд╪Ч, ╠╬╟Э╡╩въкЭ ║╙║╙ цВх╥╠Й"╡н©╪", ╡╩╪фхК╫Абш
-echo     [╡н©╪] иоцФйгЁ╖ил╧╓╬ъ╣дв╢л╛нд╪Ч, ╠╬╟Э╡╩сцкЭ: ╧Щфз╩Рдзхщ╬и╤╪╡╩кЦрЛЁё
-if defined NPASS (
-  echo.
-  echo     [к╣цВ] иоцФуБ╥щйг**Ё╖ил╧╓╬ъ**╣дв╢л╛нд╪Ч; ╠╬╟Эвъпбб╥╬╤ ^(ECAM+inpoutx64, ╡╩пХр╙ ThrottleStop^),
-  echo            кЭ╠╗"ThrottleStop гЩ╤╞н╢ткпп"йТуЩЁёожоС, гКрт [5/6] ╣д PASS н╙в╪
+  rem 2026-10-10ё╗сц╩╖р╙гСё╘ё╨пбв╟╩ЗфВ╠╬ю╢╬мц╩спуБ╦Жнд╪Ч ║╙║╙ р╩╬Д"уЩЁё"╢Ь╧Щ, ╡╩ты╢Р"н╢ур╣╫"оехк
+  echo     [OK] ╠╬╩Зц╩спЁ╖ил╧╓╬ъреаТ╣дв╢л╛нд╪Ч ^(пбв╟╩ЗфВ╠╬ю╢╬мц╩сп, уЩЁё^)
 )
 echo.
 
@@ -501,11 +577,12 @@ if "%OK2%"=="0" set "NGN=%NGN% гЩ╤╞дёй╫"
 if "%OK3%"=="0" set "NGN=%NGN% PCIe а╢б╥"
 if "%OK4%"=="0" set "NGN=%NGN% кЦа╕/от╢Ф"
 if "%OK5%"=="0" set "NGN=%NGN% ©╙╩ЗхннЯ"
+if "%GSPK%"=="0" set "NGN=%NGN% GSP╧л╪Чн╢фТсц"
 if "%OK1%"=="2" set "WAITN=%WAITN% от©╗сКгЩ╤╞"
 if "%OK2%"=="2" set "WAITN=%WAITN% гЩ╤╞дёй╫"
 if "%OK3%"=="2" set "WAITN=%WAITN% PCIe а╢б╥(кЦа╕/╢Ь©Мц╩й╣╡БЁи)"
 if "%OK4%"=="2" set "WAITN=%WAITN% кЦа╕/от╢Ф"
-if "%OK5%"=="2" set "WAITN=%WAITN% ©╙╩ЗхннЯ(н╢й╣╡Б: ╠╬╢нц╩бДхуж╬╩Р╠╬╩Зеп╡╩ак)"
+if "%OK5%"=="2" set "WAITN=%WAITN% ©╙╩ЗхннЯ(н╢й╣╡Б: ╠╬╢нц╩бДхуж╬/╠╬бж╩╧тзеэ, ╩Р╠╬╩Зеп╡╩ак)"
 echo ============================================================
 rem 2026-10-06ё╗╠╬╢н╦дтЛ╣д╨кпдё╘ё╨╫Абш╡╩тыси WDDM/Gen2/кЦа╕ хЩ╦Ж©╙╧ьр╩╬Д╩╟едЁЖю╢ё╛
 rem   ╤Ьйгох╟я 6 оН╦Ввт╣дй╣╡Б╫А╧Ш╟зЁи╡йи╚гЕ╣╔ё╛ты╟╢уБ 6 оНкЦ╫Абшё╨
@@ -525,6 +602,9 @@ if "%VERDICT%"=="х╚бл" set "SUMV=х╚бл -- WDDM + PCIe Gen2 + кЦа╕бЗя╙, ╫БкЬуЩЁё"
 if "%VERDICT%"=="пХ╦╢╨к" set "VST=2"
 if "%VERDICT%"=="пХ╦╢╨к" set "SUMV=пХ╦╢╨к -- WDDM уЩЁё + PCIe Gen2 ря╫БкЬ, ╣╚кЦа╕/от╢Ф╤айЩ╣мсзеп╬щобоч"
 if "%VERDICT%"=="╡©╥жн╢й╣╡Б" set "SUMV=╡©╥жн╢й╣╡Б -- ря╧Щ╣доН╤╪уЩЁё; н╢й╣╡Б:%WAITN%"
+rem 2026-10-08ё╨╧Бспнд╟╦╡╩╧╩ ║╙║╙ VST аТтз 0 ╩АхцуБр╩ппс║Ёи╨Ли╚ё╗иои╚╫е╠╬╟я╥г 1/0 ╣д╤╪╣╠╩фё╛ж╩сп 0 йг╨Лё╘ё╛
+rem   ©м╩╖©╢╣╫"╩фоН + ╨Л╫Абш"ууяЫ╩Артн╙╫БкЬй╖╟э║ёуБюОхцкЭ╦З"н╢й╣╡Б"╣дсОрЕр╩жбё╨╩ф║ё
+if "%VERDICT%"=="╡©╥жн╢й╣╡Б" set "VST=2"
 rem ---- ╡йи╚жПоНгЕ╣╔ё╨╠Йг╘+в╢л╛охбДЁинд╪Ч, тыси PowerShell ╤анд╪Чиои╚ ----
 rem   ё╗-Command юОж╩спп╢кю╣д╪╦╦ЖжпндвжцФа©; б╥╬╤/╡нйЩр╩би╡╩╢╚жпнд, й╣╡Б chcp 936 уЩЁёё╘
 > "%TMPCL%" echo %OK1%;от©╗сКгЩ╤╞
@@ -532,15 +612,29 @@ rem   ё╗-Command юОж╩спп╢кю╣д╪╦╦ЖжпндвжцФа©; б╥╬╤/╡нйЩр╩би╡╩╢╚жпнд, й╣╡Б chcp 93
 >> "%TMPCL%" echo %OK3%;PCIe а╢б╥ Gen2
 >> "%TMPCL%" echo %OK4%;кЦа╕сКот╢ФбЗя╙
 >> "%TMPCL%" echo %OK5%;©╙╩ЗхннЯ ╠╬╢н©╙╩З
->> "%TMPCL%" echo 2;Ё╖ил╧╓╬ъв╢л╛нд╪Ч ╡н©╪оН
+if defined GSPK >> "%TMPCL%" echo %GSPK%;GSP ╧л╪Ч
+if exist "%STAT%" >> "%TMPCL%" echo 2;Ё╖ил╧╓╬ъв╢л╛нд╪Ч ╡н©╪оН
 >> "%TMPCL%" echo V;%VST%;%SUMV%
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$cn=@{'1'='Green';'0'='Red';'2'='Yellow'};$sw=@{'1'='[OK]';'0'='[!!]';'2'='[--]'};foreach($l in ([IO.File]::ReadAllLines([string]'%TMPCL%',[Text.Encoding]::GetEncoding(936)))){$p=$l.Split([char]59);if($p.Count -lt 2){continue};if($p[0] -eq 'V'){$k=$p[1];if($k -ne '1'){if($k -ne '0'){$k='2'}};$tx=($p[2..($p.Count-1)] -join ';');Write-Host ('   ╫Абш: ' + $tx) -ForegroundColor $cn[$k]}else{$k=$p[0];if($k -ne '1'){if($k -ne '0'){$k='2'}};Write-Host ('   ' + $sw[$k] + ' ' + $p[1]) -ForegroundColor $cn[$k]}}"
 if "%OK5%"=="0" echo     - ©╙╩ЗхннЯц╩еэЁи: ╪Ш ее╡Иж╦рЩ ╣з 5 ╫з; р╡©иртж╠╫сжьфТр╩╢нтыеэ╠╬╫е╠╬
-if "%OK5%"=="2" if not defined EARLY echo     - ©╙╩ЗхннЯн╢й╣╡Б: ╠╬╢н╩╧ц╩бДхуж╬╬м╣х╫ЬвюцФ 1 ╥жжс╨Стыеэ; ╠╬╩Зеп╡╩ак╬м©╢ [5/6] ╣дк╣цВ
+if "%OK5%"=="2" if not defined EARLY echo     - ©╙╩ЗхннЯн╢й╣╡Б: ╠╬╢н╩╧ц╩бДхуж╬/╠╬бж╩╧тзеэ -- ╣х╫ЬвюцФ 1~3 ╥жжстыеэ╠╬╫е╠╬; ╠╬╩Зеп╡╩ак╬м©╢ [5/6] ╣дк╣цВ
 if "%OK1%"=="0" echo     - ц╩╤а╣╫от©╗/гЩ╤╞: охх╥хо nvidia-smi дэеэ║╒гЩ╤╞уЩЁё(иХ╠╦╧эюМфВспц╩сп╦пл╬╨е)
 if "%OK2%"=="0" echo     - гЩ╤╞дёй╫╡╩йг WDDM: ╧эюМт╠ж╢пп nvidia-smi -dm 0, х╩╨СжьфТ
-if "%OK3%"=="0" if not defined NOCSC echo     - PCIe н╢╢О Gen2: охжьфТхц©╙╩ЗхннЯжья╣; хт╡╩пп╪Л╡И ACE-BOOT йг╥Яю╧╫ь
-if "%OK4%"=="0" if not defined NOCSC echo     - кЦа╕/от╢Ф╣мсзеп╬щобоч: ╪Л╡Ийг╥Я╫╣ф╣/╦ънб, ╩РгЩ╤╞н╢уЩЁё╪сть
+if "%GSPK%"=="0" echo     - GSP ╧л╪Чн╢фТсц: к╚╩В GSPлЕ╪Л.cmd вт╤╞пч, х╩╨С║╬мЙх╚╧ь╩З║©ты©╙╩З╨С╦╢╨к
+rem 2026-10-10ё╗сц╩╖р╙гСё╘ё╨кЦа╕уЩЁё╣╚ Gen2 ц╩я╣иой╠ё╛охееЁЩ"©╙╩ЗхннЯ╩╧ц╩еэ/╩╧тзеэ"╣дй╠╪Д╢╟ё╗╣гб╪╨Ст╪ 1 ╥жжс╩╧сп╡╧еэбжё╘ё╛
+rem   х╥╤╗йгхннЯц╩╡╧ио╡ерЩ╣╪еэпч╦╢╫е╠╬ё╩ACE ря╡╩еЖё╗2026-10-10 фП╫╣╪╤а╢рфЁЩё╘ё╛╡╩тылА ACE-BOOT║ё
+if "%OK3%"=="0" if not defined NOCSC if "%OK5%"=="2" echo     - PCIe н╢╢О Gen2: ╣╚©╙╩ЗхннЯ╩╧ц╩еэмЙё╗╣гб╪╨Ст╪ 1 ╥жжс╩╧спр╩бж╡╧еэё╘║╙║╙ ╣х 2~3 ╥жжсжьеэ╠╬╫е╠╬©╢ [5/6], ох╠П╤╞
+if "%OK3%"=="0" if not defined NOCSC if not "%OK5%"=="2" echo     - PCIe н╢╢О Gen2 гр©╙╩ЗхннЯц╩╡╧ио: к╚╩В р╩╪Эпч╦╢Gen2.cmdё╗вт╤╞жь╫╗©╙╩ЗхннЯ + гЕ©╗в║╣дбжкЬ + ╣╠Ё║╡╧я╣р╩╢нё╛╫А╧Ш╢ФвюцФё╘
+if "%WSTAT%"=="MAXLOW" echo     - а╢б╥иоочж╩сп x%LWM%: ох╩╩╣зр╩лУ x16 ╡шееЁЩ╡Е╢М; рю╬итРйг©╗ц╩╡╧╣Гхщё╗с╡╪Чиооч, ╡╩с╟оЛкЦа╕ё╘
+if "%WSTAT%"=="CURLOW" echo     - а╢б╥╢с x%LWM% ╣Т╣╫ x%LWC%: мЙх╚╧ь╩Зжь╡Еот©╗/╡а╫Пйжж╦, ╡╩пп╩╩╡ш
+rem 2026-10-10ё╗сц╩╖ж╦ЁЖё╘ё╨еэбК╠ь╫БкЬ ║╙║╙ кЦа╕ц╩╫БкЬ ║ж ╠╬╢н©╙╩Зц╩въ 40HX Unlock фТ╤╞оНё╗BIOS ц╩╟якЭ╥е╣зр╩ё╘║ё
+rem   пнл╛гЬ╥жё╨SM бЗ 34 ╣╚уеа©╨к╠╩©Ёё╗TCI т╤╣мсз 4000=40T еп╬щё╛©Ёак╣д©╗ж╩йёаЦм╥ё╘= ц╩еэбКё╩бт╣мсзеп╬щ = ╫╣ф╣/╦ънб║ё
+set "LOCKSIG="
+if "%OK4%"=="0" if not defined NOCSC if %SMN% GEQ 34 if %TCI% LSS 2000 set "LOCKSIG=1"
+if defined LOCKSIG echo     - кЦа╕ц╩╫БкЬё╗SM бЗя╙╣╚уеа©╨к╠╩©Ё╣дпнл╛ё╘: вН©идэйг╠╬╢н©╙╩Зц╩въ 40HX Unlock фТ╤╞оНё╗еэбК╠ь╫БкЬё╘
+if defined LOCKSIG echo       - ╫Ь BIOS ╟я 40HX Unlock иХн╙╣зр╩фТ╤╞оНё╗╩Р╧эюМт╠еэ Install-40HXUnlock.ps1 -Mode MakeDefaultё╘, мЙх╚╧ь╩Зты©╙╩З╨С╦╢╨к
+if defined LOCKSIG echo       - етж╓: ESP юО 40hx_log.txt й╠╪Д╡╩йг╠╬╢н©╙╩З = ц╩еэбКё╗╧эюМт╠еэ -Mode Verify ©и╡Иё╘
+if "%OK4%"=="0" if not defined NOCSC if not defined LOCKSIG echo     - кЦа╕/от╢Ф╣мсзеп╬щобоч: ╪Л╡Ийг╥Я╫╣ф╣/╦ънб, ╩РгЩ╤╞н╢уЩЁё╪сть
 if "%VERDICT%"=="пХ╦╢╨к" echo     - ох©уопй╠жьеэр╩╢н: ╧ь╣Ту╪сц GPU ╣дЁлпР, ╣хр╩а╫╥жжстыеэ╠╬╫е╠╬
 if defined NOCSC echo     - ╠╬╩Зц╩сп©исц╣д csc.exe: й╣╡БкЦа╕/╢Ь©МвЖ╡╩ак(╡╩йгот©╗╧йуо), Gen2 рт [5/6] ╣д PASS н╙в╪
 if defined EARLY echo     - ╠╬╢н╪Л╡Иц╩еэмЙ(иоцФряк╣цВт╜рР): ╫Абшж╩╦╡╦гряж╢пп╣╫╣ддг╡©╥ж

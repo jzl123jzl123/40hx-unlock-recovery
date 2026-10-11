@@ -30,14 +30,22 @@ call :ace_toggle on
 call :ace_toggle HealTray
 rem ---- 2026-10-05 (review H3): lock AFTER the heal - a round that skips must have healed ACE first ----
 set "LOCKD=%LOGDIR%\postbind.lock"
+rem 2026-10-07b (review T1): per-round verdict file - two rounds starting at the same time must never
+rem   delete/overwrite each other's lock-res.txt (that could turn a lost race into a false verdict).
+set "LOCKRESF=%LOGDIR%\lock-res-!RANDOM!-!RANDOM!.txt"
+del "!LOCKRESF!" >nul 2>&1
 set "LOCKRES="
 set "LOCKED="
 call :lock
 if not "!LOCKED!"=="1" (
   >>"%LOG%" echo ==== PostBind SKIP: another round is already running - ACE was healed, nothing else changed !DATE! !TIME! ====
+  >>"%LOG%" echo SKIP reason: !LOCKWHY!
   exit /b 75
 )
 >>"%LOG%" echo round lock taken !DATE! !TIME!
+rem 2026-10-07: the lock helper now returns the reason on line 2 of lock-res.txt - log it so a
+rem remote diagnosis can tell "no lock" from "stale lock taken over from an earlier boot session".
+if defined LOCKWHY >>"%LOG%" echo lock note: !LOCKWHY!
 rem 2026-10-05: an installer run may not have been able to replace a helper file that was in use; it then
 rem   drops <name>.new next to the target. Finish that INSIDE the round lock (review r4 H1: running it before
 rem   the lock let a SKIP round taskkill a helper the winning round was working with) and only when one exists.
@@ -153,63 +161,18 @@ rem   errorlevel kept the previous value (0) and NOUTOK got set -> false PASS. f
   copy /y "!NOUT!" "%LOGDIR%\newpath-last.out" >nul 2>&1
   call :keepfail !NRC!
   del "!NOUT!" >nul 2>&1
-  >>"%LOG%" echo NewPath did not PASS - exit=!NRC! - falling back to the legacy ACE path
+  >>"%LOG%" echo NewPath did not PASS - exit=!NRC!
 ) else (
-  >>"%LOG%" echo NewPath: tool not found - using the legacy ACE path
+  >>"%LOG%" echo NewPath: tool not found
 )
-rem (ascii-only rule)
-if defined NOACETOG (
->>"%LOG%" echo ACE-PRIORITY: new path failed exit=!NRC! - no legacy fallback - done for this boot
-  >>"%LOG%" echo ==== PostBind EXIT=!NRC! !DATE! !TIME! ====
-  call :unlock
-  exit /b !NRC!
-)
-
-
-rem ---- If the driver already loaded at boot stage (Start=0 Boot) ACE must not be touched at all ----
-rem ACE-BOOT only blocks driver IMAGE LOAD; an already loaded driver keeps working, and leaving ACE-BOOT
-rem in its boot-loaded state keeps the pre-boot anti-cheat mode valid, so games do not ask for a reboot.
-set "ACE_STOPPED=1"
-
-rem ---- ACE-BOOT (Tencent pre-boot anti-cheat) blocks driver IMAGE LOAD only: stop -> retrain -> restore ----
-rem first ask ACE-Tray to step aside so it can not start inside the ACE-BOOT stop window (that is what pops up)
-if "!ACE_STOPPED!"=="1" call :ace_toggle QuiesceTray
-if "!ACE_STOPPED!"=="1" call :ace_toggle off
->>"%LOG%" echo legacy: ACE-BOOT off - starting the retrain attempts !DATE! !TIME!
-
-set "RC=99"
-rem 2026-10-01b (audit H1): the retry gate must be "not yet successful", not "== 99".
-rem   With "== 99" the 2nd/3rd attempt never ran (RC is the real code after round 1), i.e. dead retry loop.
-for /L %%I in (1,1,3) do (
-  if not "!RC!"=="0" (
-    call :heal
-rem legacy path needs ThrottleStop: temporarily allow it inside the ACE-off window, retire it right after
-    sc query ThrottleStop >nul 2>&1
-    if errorlevel 1 (
-      >>"%LOG%" echo throttle-legacy: create service ThrottleStop
-      sc create ThrottleStop type= kernel start= demand binPath= "\SystemRoot\System32\drivers\ThrottleStop.sys" >>"%LOG%" 2>&1
-      if not exist "%SYS%\ThrottleStop.sys" >>"%LOG%" echo throttle-legacy WARN: ThrottleStop.sys missing
-    )
-    sc config ThrottleStop start= demand >>"%LOG%" 2>&1
-    sc start ThrottleStop >>"%LOG%" 2>&1
-    >>"%LOG%" echo ---- attempt %%I ----
-    call "C:\ProgramData\CMP40HXGen2\windows\AutoRetrain.cmd" >>"%LOG%" 2>&1
-rem 2026-10-01b (audit H1): take the retrain exit code FIRST, then do the sc cleanup.
-rem   Otherwise RC is overwritten by "sc config"'s 0 and a failed retrain is reported as PASS.
-    set "RC=!ERRORLEVEL!"
-    sc stop ThrottleStop >>"%LOG%" 2>&1
-    sc config ThrottleStop start= disabled >>"%LOG%" 2>&1
-    if not "!RC!"=="0" if %%I LSS 3 ( >>"%LOG%" echo attempt %%I exit=!RC!, retry in 15s & ping -n 16 127.0.0.1 >nul 2>&1 )
-  )
-)
->>"%LOG%" echo ==== PostBind EXIT=!RC! !DATE! !TIME! ====
-if "!RC!"=="0" ( >>"%LOG%" echo PASS: physical Gen2 post-bind step succeeded ) else ( >>"%LOG%" echo FAIL: post-bind step did not reach Gen2 )
-rem 2026-10-01: restore UNCONDITIONALLY (regardless of Gen2 result) - never leave ACE-BOOT stopped
-if "!ACE_STOPPED!"=="1" call :ace_toggle on
-if "!ACE_STOPPED!"=="1" call :ace_toggle HealTray
-if "!ACE_STOPPED!"=="1" ( sc query ACE-BOOT | findstr /I "STATE" >>"%LOG%" 2>&1 )
+rem 2026-10-10 (user request): the legacy ACE fallback (stop ACE-BOOT -> AutoRetrain x3 -> restore ACE) is REMOVED.
+rem   The inpoutx64 new path is the only retrain path now; this script NEVER stops ACE-BOOT.
+rem   The unconditional ACE heal at the top stays: it repairs machines where an OLD package left ACE stopped.
+rem   The NO_ACE_TOGGLE marker no longer changes anything (ACE is always left untouched now).
+>>"%LOG%" echo no legacy fallback (removed 2026-10-10) - ACE-BOOT untouched - done for this boot
+>>"%LOG%" echo ==== PostBind EXIT=!NRC! !DATE! !TIME! ====
 call :unlock
-exit /b !RC!
+exit /b !NRC!
 
 :heal
 set "SYS=%SystemRoot%\System32\drivers"
@@ -286,15 +249,29 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "C:\ProgramData\CMP40HXGen2\
 exit /b 0
 
 :lock
-rem 2026-10-05: serialize rounds across the boot task / logon task / a manual double click.
-rem A stale lock (older than 30 minutes, e.g. a round killed by a shutdown) is taken over.
-rem Uses PowerShell for the age comparison; if that helper fails we do NOT block the round.
-del "%LOGDIR%\lock-res.txt" >nul 2>&1
-rem 2026-10-05 (review H3+M3): (a) age < 0 (clock rolled back) or >= 30 min = stale -> take over, otherwise one bad
-rem   lock plus an RTC problem would block every boot forever; (b) take it atomically with New-Item WITHOUT -Force,
-    rem   so two rounds starting in the same millisecond cannot both win.
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%LOCKD%'; $take=$true; if(Test-Path -LiteralPath $d){ $age=(Get-Date)-(Get-Item -LiteralPath $d).LastWriteTime; if($age.TotalMinutes -ge 0 -and $age.TotalMinutes -lt 30){ $take=$false } }; if($take){ if(Test-Path -LiteralPath $d){ Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }; try { New-Item -ItemType Directory -Path $d -ErrorAction Stop | Out-Null; Set-Content -LiteralPath (Join-Path $d 'started.txt') -Value ((Get-Date).ToString('s') + ' ' + $env:COMPUTERNAME); 'TAKEN' } catch { 'BUSY' } } else { 'BUSY' }" > "%LOGDIR%\lock-res.txt" 2>nul
-if exist "%LOGDIR%\lock-res.txt" set /p LOCKRES=<"%LOGDIR%\lock-res.txt"
+rem 2026-10-07 FIX v4 (after the second third-party review - the takeover was still not atomic):
+rem   round A and round B both judge an old lock stale; A then creates its fresh lock; if B now just
+rem   deletes "the directory" it deletes A's fresh lock and both rounds run (double retrain = false PASS /
+rem   ACE state damage). v4 therefore:
+rem     (a) takes over only the EXACT lock it judged (owner text + directory timestamp must still match),
+rem     (b) claims it with an atomic Move-Item (only one round can move that name away),
+rem     (c) writes its own owner record, then READS IT BACK and only then answers TAKEN,
+rem     (d) records the holder's process start time as well, so a reused PID cannot look like a live round.
+rem Decision order (first match wins); we only run when nobody provably holds the lock:
+rem   1 boot session differs (only when the record's first field is really our numeric ticks)  -> stale
+rem   2 the lock is older than this boot session (mtime vs LastBootUpTime, >=90s margin;
+rem     fallback: age > uptime + 2 min)                                                           -> stale
+rem   3 recorded holder is gone (PID + start time) AND corroborated (predates/ticks/age>=2min)    -> stale
+rem   4 holder alive and age < 30 min                                                            -> BUSY
+rem   5 age < 0 (clock rollback) or age >= 20 min                                                -> stale
+rem   6 no owner record at all                                                                   -> stale
+rem   7 otherwise (fresh lock without a usable record)                                           -> BUSY
+rem Verdict line 1 = TAKEN/BUSY; line 2 = reason, logged by the caller. No helper -> we run (fail-open).
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$d='%LOCKD%'; $ttl=20; $hard=30; $bootT=$null; $bt=''; try { $bootT=(Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).LastBootUpTime; $bt=[string]$bootT.Ticks } catch { $bootT=$null; $bt='' }; $me=0; $myStart=''; try { $me=[int](Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID) -ErrorAction Stop).ParentProcessId } catch { $me=0 }; if ($me -gt 0) { try { $myStart=(Get-Process -Id $me -ErrorAction Stop).StartTime.ToString('s') } catch { $myStart='' } }; $take=$true; $why='no lock was present'; if (Test-Path -LiteralPath $d) { $owner=''; $lockM=$null; try { $all=[System.IO.File]::ReadAllText((Join-Path $d 'started.txt')); $nl=$all.IndexOf([char]10); if ($nl -lt 0) { $owner=$all.Trim() } else { $owner=$all.Substring(0,$nl).Trim() } } catch { $owner='' }; try { $lockM=(Get-Item -LiteralPath $d).LastWriteTime } catch { $lockM=$null }; $f=($owner -split '\|'); $obt=[string]$f[0]; $num=$false; if ($obt -match '^[0-9]{15,}$') { $num=$true }; $hp=0; if ($f.Count -ge 4) { try { $hp=[int]$f[3] } catch { $hp=0 } }; $hs=''; if ($f.Count -ge 5) { $hs=[string]$f[4] }; $alive=$false; if ($hp -gt 0) { try { $q=Get-Process -Id $hp -ErrorAction Stop; if ([string]$q.ProcessName -like 'cmd*') { $alive=$true; if ($hs -ne '') { $qs=$q.StartTime.ToString('s'); if ($qs -ne $hs) { $alive=$false } } } } catch { $alive=$false } }; $age=(Get-Date)-$lockM; $am=[math]::Round($age.TotalMinutes,1); $predates=$false; if ($bootT -ne $null -and $lockM -lt $bootT.AddSeconds(-90)) { $predates=$true } else { $up=0; try { $up=[int64][System.Environment]::TickCount } catch { $up=0 }; if ($up -le 0) { try { $up=[int64]((Get-CimInstance Win32_PerfFormattedData_PerfOS_System -ErrorAction Stop).SystemUpTime) * 1000 } catch { $up=0 } }; if ($up -gt 60000 -and $up -lt 5184000000 -and $age.TotalMilliseconds -gt ($up + 120000)) { $predates=$true } }; $corrob=$false; if ($predates) { $corrob=$true }; if ($num -and $bt -ne '' -and $obt -ne $bt) { $corrob=$true }; if ($am -ge 2) { $corrob=$true }; if ($num -and $bt -ne '' -and $obt -ne $bt) { $why=('stale: lock from an earlier boot session (' + $owner + ')') } elseif ($predates) { $why=('stale: the lock is older than this boot session (' + $owner + ', age ' + $am + ' min)') } elseif ($hp -gt 0 -and -not $alive -and $corrob) { $why=('stale: holder pid ' + $hp + ' is gone (' + $owner + ', age ' + $am + ' min)') } elseif ($alive -and $am -ge 0 -and $am -lt $hard) { $take=$false; $why=('held by a live round: ' + $owner + ', age ' + $am + ' min') } elseif ($am -lt 0 -or $am -ge $ttl) { $why=('stale: age ' + $am + ' min') } elseif ($obt -eq '' -and $am -lt 1) { $take=$false; $why=('empty lock record appeared moments ago - another round may be writing its record right now (age ' + $am + ' min)') } elseif ($obt -eq '') { $why='stale: lock has no owner record' } else { $take=$false; $why=('held (holder not identifiable): ' + $owner + ', age ' + $am + ' min') } }; if ($take) { $claimed=$false; if (Test-Path -LiteralPath $d) { $same=$false; $nowOwner=''; try { $t2=[System.IO.File]::ReadAllText((Join-Path $d 'started.txt')); $nl2=$t2.IndexOf([char]10); if ($nl2 -lt 0) { $nowOwner=$t2.Trim() } else { $nowOwner=$t2.Substring(0,$nl2).Trim() } } catch { $nowOwner='' }; $nowM=$null; try { $nowM=(Get-Item -LiteralPath $d).LastWriteTime } catch { $nowM=$null }; if ($null -ne $nowM -and $null -ne $lockM -and $nowM -eq $lockM -and $nowOwner -eq $owner) { $same=$true }; if ($same) { $aside=($d + '.stale-' + [string]$PID + '-' + [string](Get-Random)); try { Move-Item -LiteralPath $d -Destination $aside -ErrorAction Stop; Remove-Item -LiteralPath $aside -Recurse -Force -ErrorAction SilentlyContinue; $claimed=$true } catch { $claimed=$false; $why=('stale lock could not be claimed atomically (' + $_.Exception.Message + ')') } } else { $claimed=$false; $why='the lock changed while we were judging it - another round holds the lock now' } } else { $claimed=$true }; if (-not $claimed) { 'BUSY'; $why } else { $made=$false; try { New-Item -ItemType Directory -Path $d -ErrorAction Stop | Out-Null; $made=$true } catch { $made=$false }; if (-not $made) { if (Test-Path -LiteralPath $d) { 'BUSY'; ('another round won the lock while we were taking it over - ' + $why) } else { 'TAKEN'; ('could not create the lock, continuing anyway - ' + $_.Exception.Message) } } else { $val=($bt + '|' + (Get-Date).ToString('s') + '|' + $env:COMPUTERNAME + '|' + [string]$me + '|' + $myStart); $wrote=$false; for ($tryNo=1; $tryNo -le 2; $tryNo++) { try { Set-Content -LiteralPath (Join-Path $d 'started.txt') -Value $val -ErrorAction Stop; $wrote=$true; break } catch { Start-Sleep -Milliseconds 300 } }; if (-not $wrote) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue; 'TAKEN'; 'created the lock directory but could not write the owner record - continuing anyway' } else { $back=''; try { $all3=[System.IO.File]::ReadAllText((Join-Path $d 'started.txt')); $nl3=$all3.IndexOf([char]10); if ($nl3 -lt 0) { $back=$all3.Trim() } else { $back=$all3.Substring(0,$nl3).Trim() } } catch { $back='' }; if ($back -eq $val) { 'TAKEN'; ('took the lock - ' + $why) } else { 'BUSY'; 'the owner record did not stick - treating this as a lost race' } } } } } else { 'BUSY'; $why }" > "%LOCKRESF%" 2>nul
+if exist "%LOCKRESF%" set /p LOCKRES=<"%LOCKRESF%"
+rem 2026-10-07: line 2 = reason. usebackq so the quoted token is read as a FILE, not as a string.
+if exist "%LOCKRESF%" for /f "usebackq skip=1 delims=" %%R in ("%LOCKRESF%") do set "LOCKWHY=%%R"
+del "%LOCKRESF%" >nul 2>&1
 if "!LOCKRES!"=="TAKEN" set "LOCKED=1"
 if not defined LOCKRES set "LOCKED=1"
 exit /b 0
