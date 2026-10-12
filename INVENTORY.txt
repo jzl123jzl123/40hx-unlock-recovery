@@ -45,7 +45,7 @@ d2f8f43def04ae97bade7ce89955528e      1012  evidence/inpout-20260929/00-diag-fai
 014ac1e5bd011b010934c7782de365e7       320  .gitattributes
 4f91bded2ac11e84bb54491c70942763      5038  LICENSE
 cc4a3adb52affbf9789a2af60fc95836      1025  oneclick/GSP体检.cmd
-e590d29a0d354a7ed82ce72a9d5c17a7    219071  oneclick/Install-40HXUnlock.ps1
+2f021b7c93b4b6efb2c2a33484960391    223171  oneclick/Install-40HXUnlock.ps1
 4f91bded2ac11e84bb54491c70942763      5038  oneclick/LICENSE
 8598c45c61f04e9ce2145628adcfe28b    134522  oneclick/payload/drivers/inpoutx64.dll.b64
 59f7f4409873dae9abb7eba851d958bc     20540  oneclick/payload/drivers/inpoutx64.sys.b64
@@ -60,14 +60,14 @@ dd38d4d86ea1326e8c01266c4de2ab6c     19984  oneclick/payload/windows/ACE-Toggle.
 0e89d1445f01106eb33bd971e8cebd8b      7857  oneclick/THIRD_PARTY.md
 e930dd8a8130ef830c25a0240d403b37      1908  oneclick/一键修复Gen2.cmd
 da373e3e11b189c5eab5e4ace89ca8e5     25908  oneclick/一键修复Gen2.ps1
-2af273adeaf43101f65d26c96196d281      3679  oneclick/一键卸载.cmd
-f1a185cae382dcf8ad718ed11cd96073      5230  oneclick/一键安装.cmd
-70114ee910ae41c67ea2a993370e8422      2899  oneclick/一键诊断.cmd
+be89ef216ca3abcceb0972b736b23f08      3931  oneclick/一键卸载.cmd
+c06f005230cccbd19b1e837ebb8494cb      5607  oneclick/一键安装.cmd
+b4f4e158e9a4b3248a6d5a83a30316c8      3151  oneclick/一键诊断.cmd
 9a331db307d3c6220646dbaf08f42171      1953  oneclick/工具-测试与修复/ACE修复.cmd
 ab06ce5a911dac4fc3b8b9fae02560dd     49084  oneclick/工具-测试与修复/ACE修复.ps1
 6f6a24af5ca0365cb248d2e21f1f8d5d      1486  oneclick/工具-测试与修复/DesktopRecover.cmd
 4cab7f393d0c9c7477f73fc58c59f1bf     11143  oneclick/工具-测试与修复/DesktopRecover.ps1
-cb037355be8d6a4d5940d526c5a66ef6      1830  oneclick/工具-测试与修复/MBR转GPT.cmd
+83932838049ee3642047fb5f97eaecb5      2082  oneclick/工具-测试与修复/MBR转GPT.cmd
 cf6d79c4694763913e3f602d49209525     10802  oneclick/工具-测试与修复/MBR转GPT.ps1
 46b781ab6f34ac7f58114f1cd8ac4353      7508  oneclick/工具-测试与修复/README-工具说明.txt
 2be36e6cbef9744b0dee77587fc5c019      1957  oneclick/工具-测试与修复/修复ACE.cmd
@@ -75,8 +75,8 @@ a321d5168a05f453ededaea4b6a9bdda      1425  oneclick/工具-测试与修复/判�
 d3350b00446b91518a6fea57d9e78817     10234  oneclick/工具-测试与修复/判断延长线.ps1
 b658b262bc89fb4410301ba9d22f8cec      1458  oneclick/工具-测试与修复/回滚-安全加固.cmd
 e53457b179ee901d49c1104fb774a65a      5278  oneclick/工具-测试与修复/回滚-安全加固.ps1
-95d16112f172c514a6986841117f0842      2267  oneclick/工具-测试与修复/存储体检.cmd
-c0e53205db78be0e9fccc5964802f8db      1612  oneclick/工具-测试与修复/安全模式-修复.cmd
+41474582c63d41245b2c5c6423f1a30d      2519  oneclick/工具-测试与修复/存储体检.cmd
+90da028c82076c1c88d1ad64b06ed596      1731  oneclick/工具-测试与修复/安全模式-修复.cmd
 f25f4ae3f932cd076293f241970c46a6      5608  oneclick/工具-测试与修复/安全模式-修复.ps1
 43f62329fce41b213d77c649addca275      1386  oneclick/工具-测试与修复/收集蓝屏证据.cmd
 3ee0acee29efa0574f01d6efabaeb325      9383  oneclick/工具-测试与修复/收集蓝屏证据.ps1
@@ -89,8 +89,8 @@ fce9d8dca7beaa23e5d9baa60e2e91dd      1465  oneclick/工具-测试与修复/桌�
 4cab7f393d0c9c7477f73fc58c59f1bf     11143  oneclick/工具-测试与修复/桌面恢复.ps1
 1f3b193babf18fcd0d2d380c724c4dca      1440  oneclick/工具-测试与修复/测试延长线-用别的显卡.cmd
 099f2b29e0026f5db4ade4e029b6d4b0      5609  oneclick/工具-测试与修复/测试延长线-用别的显卡.ps1
-63d3ac0e49f81e54c1dd9082d2f4b27f      2111  oneclick/工具-测试与修复/补写Gen2预埋.cmd
-7c376541c3be2e419b8061d678a6c652      2173  oneclick/工具-测试与修复/补写Gen2预埋-dry.cmd
+6390c2e67f7fa083737a0d76c81ca82e      2363  oneclick/工具-测试与修复/补写Gen2预埋.cmd
+39f3a8d0ae80536787f87ef69bb04ba8      2425  oneclick/工具-测试与修复/补写Gen2预埋-dry.cmd
 5e684d4ed7104c8cf5f85800eed4a5ae     10683  oneclick/工具-测试与修复/补写Gen2预埋.ps1
 e348416f4185fadfa780a3f63c356134     55114  oneclick/工具-测试与修复/诊断包-20260930/40HX诊断.ps1
 e5b1792debe8e0c89fda1ced340d02e0      2341  oneclick/工具-测试与修复/诊断包-20260930/README-诊断包说明.txt
@@ -120,7 +120,7 @@ e3cf708f75d0d369cd60f25133315eac      9075  oneclick/文档/给客户-Gen2预埋
 6fb85ad44c58899fbdf0e2782dce20ff      3270  oneclick/文档/给客户-操作指引-20261001.txt
 cd0aebb821333af79e574a0b1b401e18     14085  oneclick/文档/风险与恢复.md
 88f44d6e7113e4d01e6f0586dfd728db    158073  oneclick/文档/验证记录.md
-b9190960f992083a8e489f380ee953b9     46515  oneclick/状态自检.bat
+56d8f761804b265ea01bba34fc63a63d     47592  oneclick/状态自检.bat
 82c7fceede927d3101aab34768fd70d6      1686  payload/drivers/README.md
 8cf6ba0b9577f2362758c486e2f23d76      2146  payload/drivers/RESTORE-DRIVERS.ps1
 6bc8e3505d9f51368ddf323acb6abc49     50216  payload/drivers/ThrottleStop.sys
@@ -180,7 +180,7 @@ c7c28a0972d3bc2e024e4a766d16f516      3533  payload/windows-live/RunPostBind.cmd
 71458e1cbf9d86c288c1a1faa714e0bd      2776  payload/windows-live/RunPostBind.no-ace.cmd.bak
 6e3f7dbd75d2e59fd824c195b7278477       735  payload/windows-live/Status.cmd
 2a44b95ea3797a1dcffe4cf5fe4fb08f      1017  payload/windows-live/Uninstall_Auto.cmd
-cb70d20136ed0e3602e00c2bb6b51635     17918  README.md
+e1fae8a39a94a875d0fab6c6b1c22274     18864  README.md
 d094d3d8f42685ee61bddc9b9aa33474     31563  scripts/40HX解锁状态.bat
 a263240ac52b02cb91cf692e965be17c       996  scripts/clean-run-keys.ps1
 9070c6fe409e3005a14cc02aa9f97c67      4611  scripts/coldboot-report.ps1
