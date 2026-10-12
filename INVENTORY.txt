@@ -71,7 +71,6 @@ ab06ce5a911dac4fc3b8b9fae02560dd     49084  oneclick/工具-测试与修复/ACE�
 4cab7f393d0c9c7477f73fc58c59f1bf     11143  oneclick/工具-测试与修复/DesktopRecover.ps1
 cb037355be8d6a4d5940d526c5a66ef6      1830  oneclick/工具-测试与修复/MBR转GPT.cmd
 cf6d79c4694763913e3f602d49209525     10802  oneclick/工具-测试与修复/MBR转GPT.ps1
-27e785793ccdaefb68cdc55c99dce8e7  23535616  oneclick/工具-测试与修复/nvflash64.exe
 46b781ab6f34ac7f58114f1cd8ac4353      7508  oneclick/工具-测试与修复/README-工具说明.txt
 2be36e6cbef9744b0dee77587fc5c019      1957  oneclick/工具-测试与修复/修复ACE.cmd
 a321d5168a05f453ededaea4b6a9bdda      1425  oneclick/工具-测试与修复/判断延长线.cmd
@@ -101,8 +100,6 @@ e5b1792debe8e0c89fda1ced340d02e0      2341  oneclick/工具-测试与修复/诊�
 fcb16124cfc705f43b9a52841613cc6e      2168  oneclick/工具-测试与修复/诊断包-20260930/修复-GSP.cmd
 5396b3cb659aa8b4b42845c05eb50b7f      6025  oneclick/工具-测试与修复/诊断包-20260930/修复-GSP.ps1
 80041a94ab8eb7d63f21cd1804375b93     12621  oneclick/工具-测试与修复/诊断包-20260930/装完黑屏43-原因与修复说明.md
-d1cd5a9f638a13072ad41f3aba2471c6      4094  oneclick/工具-测试与修复/采集VBIOS.cmd
-2b3d2536570ba0be5491bba01a43a204       866  oneclick/工具-测试与修复/采集VBIOS-说明.txt
 d678a34f23be054867e98390fccb8086     24647  oneclick/归档-旧版本/ACE排查/ACE-Diag.ps1
 ab6c31bbc75192746fe0bbaaf1c6a9d9      3978  oneclick/归档-旧版本/ACE排查/怎么用-先读我.txt
 0a4b7b9215a38fa828790a238f69bc4e       961  oneclick/归档-旧版本/ACE排查/排查ACE.cmd
@@ -124,7 +121,7 @@ e3cf708f75d0d369cd60f25133315eac      9075  oneclick/文档/给客户-Gen2预埋
 0ed5589c3c81c673ac1783a3ca58293d      3618  oneclick/文档/给客户-安装退出码196608-怎么办.txt
 6fb85ad44c58899fbdf0e2782dce20ff      3270  oneclick/文档/给客户-操作指引-20261001.txt
 cd0aebb821333af79e574a0b1b401e18     14085  oneclick/文档/风险与恢复.md
-8f25444e431e8ae5ee160b5b21f3dc32    156801  oneclick/文档/验证记录.md
+ff5655974d222b92c702393919756656    157277  oneclick/文档/验证记录.md
 b9190960f992083a8e489f380ee953b9     46515  oneclick/状态自检.bat
 82c7fceede927d3101aab34768fd70d6      1686  payload/drivers/README.md
 8cf6ba0b9577f2362758c486e2f23d76      2146  payload/drivers/RESTORE-DRIVERS.ps1
