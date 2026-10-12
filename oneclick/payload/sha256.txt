@@ -6,6 +6,4 @@ aedc410f05ed43e5833543a0dc849242  590868  EFI/40HXUNLK.EFI
 a57550bb90f5a4b82d7367505e8468f6  78995  windows/40hx-retrain-inpout.ps1
 dd38d4d86ea1326e8c01266c4de2ab6c  19984  windows/ACE-Toggle.ps1
 544dc24781fb08de94ea685c7e38ee25  26044  windows/RunPostBind.cmd
-6e3f7dbd75d2e59fd824c195b7278477  735  windows/Status.cmd
-2a44b95ea3797a1dcffe4cf5fe4fb08f  1017  windows/Uninstall_Auto.cmd
 8dc1be522a6c4b1c644050895508f065  6581  windows/Unpack-Drivers.ps1

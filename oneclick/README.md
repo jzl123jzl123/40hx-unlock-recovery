@@ -186,7 +186,7 @@ powershell -ExecutionPolicy Bypass -File "Install-40HXUnlock.ps1" -Mode Uninstal
 - **每次开机的自愈**：开机任务 `CMP40HX Gen2 PostBind`（SYSTEM）跑上面那套；成功率更高，驱动被杀软清了会自动从 ESP 兜底源补回；登录后 60 秒还有一次"补跑"。
 
 **出处与致谢**：本项目基于开源项目 **CMP40HX-Unlock（https://github.com/PZH1gdmu/CMP40HX-Unlock）** 改进。
-上游提供了解锁原理与 Windows 侧 helper（`CMP40HXGen2.exe` / `AutoRetrain.cmd`）与驱动思路；本包把它做成"自含、可迁移、双击即装"的一键包，
+上游提供了解锁原理、Gen2 研究结论与驱动思路（其 Windows 侧 helper 已全部被本包自写实现替代，包内无上游二进制）；本包把它做成"自含、可迁移、双击即装"的一键包，
 并解决了现场遇到的一堆坑：GSP（代码 43 根因）、快速启动、腾讯 ACE 预启动模式、杀软隔离驱动、目录 ACL 提权面、VBIOS 批次差异、显卡/根端口位置自动探测等。
 本包**不调用**上游安装器（它会覆盖 ESP 上的 OnlyEFI 固件 → Gen2 永远落不了地），固件/启动项/任务/驱动全部自己写。
 

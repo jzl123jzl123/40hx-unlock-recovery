@@ -107,7 +107,7 @@
 
 | 来源 | 项目 | 用到了什么 |
 |---|---|---|
-| **上游（本项目的基础）** | **CMP40HX-Unlock — https://github.com/PZH1gdmu/CMP40HX-Unlock** | 解锁原理与整套 Windows 侧工具：`CMP40HXGen2.exe`（守卫 + 恢复两个策略寄存器 + 根端口重训）、`AutoRetrain.cmd`、`Status.cmd`、驱动选型与 Gen2 研究结论 |
+| **原理与血统来源**（历史归因，按 MIT 致谢） | **CMP40HX-Unlock — https://github.com/PZH1gdmu/CMP40HX-Unlock**（仓库与账号现已 404） | 解锁原理、Gen2 寄存器研究结论、驱动选型来自它；其 Windows 侧工具（`CMP40HXGen2.exe` / `AutoRetrain.cmd` / `Status.cmd` 等）**已全部被本仓自写实现替代**（2026-10-10/12 分两批移除）——当前一键包内无任何上游二进制，无运行时依赖 |
 | 解锁固件 | OnlyEFI v0.1.1 — https://github.com/BardKing-CN/CMP40HX-Unlock-OnlyEFI （MIT） | `\EFI\40HX\40HXUNLK.EFI`：算力解锁 + Gen2 策略寄存器/TLS 预埋，**故意不在 EFI 里重训链路**（这样才不会复位显卡、算力与 Gen2 才能并存） |
 | 第三方驱动 | ThrottleStop.sys / WinRing0x64.sys / inpoutx64.sys | MMIO 与 PCI 配置空间读写（BYOVD 类工具，杀软报警属预期） |
 

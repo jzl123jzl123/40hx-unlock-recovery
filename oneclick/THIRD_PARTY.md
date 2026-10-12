@@ -9,7 +9,7 @@
 | 项目 | **CMP40HX-Unlock** |
 | 地址 | https://github.com/PZH1gdmu/CMP40HX-Unlock（**仓库与账号 2026-10-10 已不可访问**，GitHub API 返回 404） |
 | 许可 | **MIT**（其仓库 `LICENSE` 为 `MIT License` + `Copyright (c) 2026`；2026-10-02 核对。原声明与许可证文本已按 MIT 要求完整保留在仓库根目录 `LICENSE`） |
-| 本包用到的部分 | 解锁原理与寄存器/Gen2 研究结论；驱动选型；以及 Windows 侧 helper 脚本 `payload\windows\Status.cmd`。另：`CMP40HXGen2.exe`、`AutoRetrain.cmd` 曾随包分发（与 `CMP40HX-Unlock-OnlyEFI` v0.1.1 发布包同名文件逐字节相同，md5 对照见第 6 节），**2026-10-10 起已随"停 ACE 降级链"移除、不再分发** |
+| 本包用到的部分 | 解锁原理与寄存器/Gen2 研究结论、驱动选型（**仅原理与结论**，当前包内无任何上游二进制）。其 Windows 侧 helper（`CMP40HXGen2.exe` / `AutoRetrain.cmd` / `Status.cmd` / `Uninstall_Auto.cmd`）曾随包分发（与 `CMP40HX-Unlock-OnlyEFI` v0.1.1 发布包同名文件逐字节相同，md5 对照见第 6 节），已全部移除、不再分发：前两个 2026-10-10 随"停 ACE 降级链"移除，后两个 2026-10-12 移除（功能由自写的 状态自检.bat / 一键卸载.cmd 覆盖） |
 
 > 本包**不调用**上游安装器（`40HXInstaller.exe`）—— 它会覆盖 ESP 上 OnlyEFI 的解锁固件，导致 Gen2 永远落不了地。
 > 本包的安装器自己完成 ESP 固件写入、NVRAM 启动项、开机任务注册与驱动自愈。
@@ -70,7 +70,7 @@
 | 部分 | 来源 | 说明 |
 |---|---|---|
 | 解锁原理、寄存器 / Gen2 研究结论、驱动选型 | 上游 CMP40HX-Unlock | 结论与思路沿用（上游仓库已不可访问，无法再逐行比对） |
-| Windows 侧 helper：`payload\windows\Status.cmd`（另：`CMP40HXGen2.exe`、`AutoRetrain.cmd` 曾随包分发，2026-10-10 起已移除、不再分发） | 上游 **CMP40HX-Unlock-OnlyEFI v0.1.1** 发布包的 `windows\` 目录（其源码为包内 `source/windows/CMP40HXGen2_prod.c`） | 按原样分发（未重编译、未改写），本包只调用其命令行接口；与 OnlyEFI 发布包同名文件逐字节相同：`CMP40HXGen2.exe` md5 `1490de9bd90105e6ebc73e50abecc5cf`、`AutoRetrain.cmd` md5 `0021c1978b749ee7e55834e2aa7ef59a`、`Status.cmd` md5 `6e3f7dbd75d2e59fd824c195b7278477`（前两个 md5 为历史记录：一键包已移除；仓内上游原包存档 `payload/onlyefi-v0.1.1/` 与历史快照 `payload/windows-live/` 仍含，仅作来源证据） |
+| Windows 侧 helper（**全部为历史记录，2026-10-12 起不再分发**）：`Status.cmd` / `Uninstall_Auto.cmd` / `CMP40HXGen2.exe` / `AutoRetrain.cmd` | 上游 **CMP40HX-Unlock-OnlyEFI v0.1.1** 发布包的 `windows\` 目录（其源码为包内 `source/windows/CMP40HXGen2_prod.c`） | 曾按原样分发（未重编译、未改写），现已全部移除（功能由本仓自写的安装器/状态自检/卸载器覆盖）；历史 md5 留档：`CMP40HXGen2.exe` `1490de9bd90105e6ebc73e50abecc5cf`、`AutoRetrain.cmd` `0021c1978b749ee7e55834e2aa7ef59a`、`Status.cmd` `6e3f7dbd75d2e59fd824c195b7278477`（仓内上游原包存档 `payload/onlyefi-v0.1.1/` 与历史快照 `payload/windows-live/` 仍含，仅作来源证据） |
 | `payload\EFI\40HXUNLK.EFI`（OnlyEFI v0.1.1） | 上游 CMP40HX-Unlock-OnlyEFI | 按原样分发（安装器还会用 sha256 核对是不是这份固件） |
 | 一键包安装器、开机任务与多源自愈、首选路径 `40hx-retrain-inpout.ps1`、GSP 三态判定、状态自检与各修复工具、全部文档 | 本仓库自写（`Copyright (c) 2026 nie2100`，**保留所有权利**、禁止转售） | 上游没有这些；上游安装器（`40HXInstaller.exe`）本包**不调用** |
 | `WinRing0x64.sys` / `inpoutx64.sys` / `inpoutx64.dll` | 各自原作者 | 自带数字签名，按 base64 文本原样分发 |

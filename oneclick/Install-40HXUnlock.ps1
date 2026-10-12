@@ -1764,7 +1764,9 @@ function Install-WindowsFiles {
     }
   }
   # 2026-10-10（用户要求）：CMP40HXGen2.exe / AutoRetrain.cmd 随降级链移除，不再部署
-  $helperList = @('Status.cmd', 'Uninstall_Auto.cmd', 'ACE-Toggle.ps1', '40hx-retrain-inpout.ps1', 'Unpack-Drivers.ps1')
+  # 2026-10-12：Status.cmd / Uninstall_Auto.cmd（上游 helper 族最后的两个残余）不再部署——
+  #   状态查看有 状态自检.bat、卸载有 一键卸载.cmd（-Mode Uninstall），功能全覆盖。
+  $helperList = @('ACE-Toggle.ps1', '40hx-retrain-inpout.ps1', 'Unpack-Drivers.ps1')
   foreach ($f in $helperList) {
     $s = Join-Path $src $f
     if (-not (Test-Path $s)) { Fail ("载荷缺失: " + $s) $script:ExitHash '包不完整 → 重新解压一份完整包（payload 目录必须跟脚本在一起）' }
@@ -1818,7 +1820,8 @@ function Install-WindowsFiles {
     Add-Action 'logs/state 目录没建成功：检查 C:\ProgramData\CMP40HXGen2 的权限后跑 -Mode Repair'
   }
   # 2026-10-10（用户要求）：移除"停 ACE"降级链 —— 清掉老版本留在 ProgramData 的两个文件（删不掉只提示，不致命）
-  foreach ($legacy in @('CMP40HXGen2.exe', 'AutoRetrain.cmd', 'CMP40HXGen2.exe.new', 'AutoRetrain.cmd.new')) {
+  # 2026-10-12：再补上游 helper 族残余 Status.cmd / Uninstall_Auto.cmd（功能由 状态自检.bat / 一键卸载.cmd 覆盖）
+  foreach ($legacy in @('CMP40HXGen2.exe', 'AutoRetrain.cmd', 'CMP40HXGen2.exe.new', 'AutoRetrain.cmd.new', 'Status.cmd', 'Uninstall_Auto.cmd')) {
     $lp = Join-Path $script:ProgDataWin $legacy
     if (Test-Path -LiteralPath $lp) {
       try { Remove-Item -LiteralPath $lp -Force -ErrorAction Stop; Info ('已移除降级链遗留文件: ' + $legacy) }
