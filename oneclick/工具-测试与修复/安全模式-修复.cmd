@@ -4,7 +4,9 @@ title 40HX 安全模式修复（开机蓝屏）
 net session >nul 2>&1
 if errorlevel 1 (
   echo 需要管理员权限，正在自动提权...
-  powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs" >nul 2>&1
+  rem 2026-10-12（参考 Cyridd/cmpunlocker #2）：路径改走环境变量 HXSELF，防路径含单引号截断
+  set "HXSELF=%~f0"
+  powershell -NoProfile -Command "Start-Process -FilePath $env:HXSELF -Verb RunAs" >nul 2>&1
   exit /b
 )
 cd /d "%~dp0"

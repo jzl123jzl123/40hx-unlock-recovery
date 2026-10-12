@@ -87,7 +87,11 @@ set /p ANS=回车开始安装，输入 n 退出:
 if /i "%ANS%"=="n" goto quit
 echo.
 echo [*] 正在申请管理员权限：会弹 UAC 和一个新的黑窗口，装完按任意键关闭
-powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList 'elevated %*' -Verb RunAs"
+rem 2026-10-12（参考 Cyridd/cmpunlocker FORK_CHANGES #2）：提权命令不再把路径嵌进命令串——路径含单引号会截断；
+rem   改走环境变量 HXSELF：由**未提权**的 powershell 展开成字面量路径再交给 ShellExecuteEx（实测真机 UAC 通过）。
+rem   参数维持原写法 'elevated %*' 内嵌——该机制多年客户机验证；参数文件/cmd.exe /c 两条替代路线本机实测均不可靠，已回退。
+set "HXSELF=%~f0"
+powershell -NoProfile -Command "Start-Process -FilePath $env:HXSELF -ArgumentList 'elevated %*' -Verb RunAs"
 goto :eof
 
 

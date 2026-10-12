@@ -286,11 +286,14 @@ function Get-DisplayClassSubKeys {
     $mid = [string](Get-ItemProperty -Path $sub.PSPath -Name 'MatchingDeviceId' -ErrorAction SilentlyContinue).MatchingDeviceId
     $dd = [string](Get-ItemProperty -Path $sub.PSPath -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc
     if ($mid -match '(?i)ven_10de&dev_1f0b' -or $dd -match 'CMP 40HX') {
+      # 2026-10-12（参考 Cyridd/cmpunlocker FORK_CHANGES #1）：HwBound = MatchingDeviceId 真含 DEV_1F0B。
+      #   伪装/魔改驱动能把显示名改成 "CMP 40HX"/"RTX 2070"，但 MatchingDeviceId 是硬件关联字段 —— 只有 HwBound 的子键才允许写。
       $out += [pscustomobject]@{
         Path            = $sub.PSPath
         Name            = $sub.PSChildName
         DriverDesc      = $dd
         MatchingDeviceId = $mid
+        HwBound         = [bool]($mid -match '(?i)ven_10de&dev_1f0b')
         Value           = (Get-ItemProperty -Path $sub.PSPath -Name 'EnableGpuFirmware' -ErrorAction SilentlyContinue).EnableGpuFirmware
       }
     }
@@ -1286,6 +1289,15 @@ function Get-CheckReport {
   if ($r.Smi) {
     try { $vb = (Invoke-Native { & $r.Smi --query-gpu=vbios_version --format=csv,noheader 2>&1 } | Out-String).Trim(); if ($vb) { $r.Vbios = $vb } } catch { }
   }
+  # 2026-10-12（参考 Cyridd/cmpunlocker #4）：BAR1 大小读出（nvidia-smi -q，纯只读、不加载任何底层驱动）。0 = 读不到。
+  $r.Bar1MiB = 0
+  if ($r.Smi) {
+    try {
+      $q4 = (Invoke-Native { & $r.Smi -q 2>&1 } | Out-String)
+      $mBar = [regex]::Match($q4, '(?s)BAR1 Memory Usage.*?Total\s*:\s*(\d+)\s*MiB')
+      if ($mBar.Success) { $r.Bar1MiB = [int]$mBar.Groups[1].Value }
+    } catch { }
+  }
   $r.Blocklist = ''
   # 易受攻击驱动阻止列表：开着时可能把 ThrottleStop / WinRing0 的服务改成"禁用"（客户机实测 Start=4 → sc start 1058）
   try { $r.Blocklist = [string](Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Config' -Name 'VulnerableDriverBlocklistEnable' -ErrorAction SilentlyContinue).VulnerableDriverBlocklistEnable } catch { }
@@ -1353,6 +1365,11 @@ function Show-Check {
     }
   } else { & $gspSev "nvidia-smi : 找不到 —— 先把 NVIDIA 驱动装好再解锁（没驱动就解锁 = 黑屏 + Code 43）"; Add-Action '机器上没有 nvidia-smi：先装 NVIDIA 驱动，再重跑 Install' }
   if ($Report.Vbios) { Info ('显卡 VBIOS : ' + $Report.Vbios + '   （批次不同 → Gen2 基线不同；本包按位判定，不是写死常量）') }
+  # 2026-10-12（参考 Cyridd/cmpunlocker #4）：ReBAR/BAR1 读出 —— NVIDIA 控制面板对 40HX 不显示 ReBAR，这里直接给读数。
+  if ($Report.Bar1MiB) {
+    if ($Report.Bar1MiB -ge 8192) { Ok ('ReBAR     : 已启用（BAR1 = ' + $Report.Bar1MiB + ' MiB ≈ 8 GiB，显存可整块映射）') }
+    else { Info ('ReBAR     : 未启用（BAR1 = ' + $Report.Bar1MiB + ' MiB，原生就是这个量级）—— 游戏影响可忽略、不用管；跑 AI/大显存负载想开：BIOS 里 Above 4G Decoding + Resizable BAR 都打开（本包不改 ReBAR；主板不支持就开不了，属正常）') }
+  }
   if ($Report.Blocklist -eq '1') {
     Warn '易受攻击驱动列表 : 开着（VulnerableDriverBlocklistEnable=1）—— 它/360/ACE 都可能把 WinRing0 的服务改成“禁用”（客户机实测 Start=4 → sc start 失败 1058）；本包每次开机会把 WinRing0 启动类型纠正回 demand 自愈。ThrottleStop 已退役：不再部署，老机器上保持 停+禁用'
     Add-Action '易受攻击驱动列表开着：想彻底关掉（厂商安装器也关它）就用 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 0 /f 然后重启；不关也行，本包每次开机都会纠正服务启动类型'
@@ -1421,6 +1438,34 @@ function Show-Check {
       $tls = $txt | Select-String -Pattern 'TLS|NO-RETRAIN' | Select-Object -Last 3
       foreach ($l in $tls) { Info ("  " + $l.Line) }
     } else { Info "40hx_log.txt 不存在（解锁固件这次开机没运行）" }
+    # 2026-10-12（参考 Cyridd/cmpunlocker FORK_CHANGES #3/#8）：Secure Boot 开着时固件会【静默跳过】未签名 EFI ——
+    #   Windows 正常开机、不报错、解锁没跑；旧版只有上面一句"可能没跑"的泛提示。这里把这个组合直接点名。
+    if ($Report.SecureBoot -eq $true) {
+      $sigState = ''
+      foreach ($p in @($efi1, $efi2)) {
+        if (Test-Path $p) {
+          $st = ''
+          try { $st = [string](Get-AuthenticodeSignature -LiteralPath $p -ErrorAction Stop).Status } catch { $st = '读不到' }
+          Info ($p + ' 签名状态: ' + $st)
+          if ($st -eq 'NotSigned') { $sigState = 'NotSigned' }
+        }
+      }
+      $unlockedFresh2 = $false
+      if (Test-Path $log) {
+        $t3 = Get-Content -LiteralPath $log -ErrorAction SilentlyContinue
+        $bt3 = $null; try { $bt3 = (Get-CimInstance Win32_OperatingSystem -ErrorAction SilentlyContinue).LastBootUpTime } catch { }
+        if (($t3 -match 'UNLOCKED \(SS0=0x88888888 SS1=0x8\)') -and $bt3 -and ((Get-Item $log).LastWriteTime -ge $bt3.AddMinutes(-10))) { $unlockedFresh2 = $true }
+      }
+      if (-not $unlockedFresh2) {
+        if ($sigState -eq 'NotSigned') {
+          Bad '本次开机解锁固件没跑 + Secure Boot 开着 + ESP 上的 EFI 未签名 → 固件【静默跳过】了解锁 EFI（不报错、Windows 照常进系统）—— 这就是"装了没效果"的最典型形态'
+          Add-Action '进 BIOS 关闭 Secure Boot，然后【完全关机】再开机，跑 状态自检.bat 复核（Secure Boot 开着时未签名 EFI 一律不执行，且无任何报错）'
+        } else {
+          Warn 'Secure Boot 开着而本次开机解锁没跑：固件很可能静默跳过了未签名 EFI（不报错）—— 进 BIOS 关 Secure Boot 后【完全关机】再开机复核'
+          Add-Action '进 BIOS 关闭 Secure Boot 后【完全关机】再开机复核'
+        }
+      }
+    }
     Dismount-Esp
   } elseif ($Report.Admin) { Warn '找不到 ESP 分区（Windows 恢复/RE 环境下才会这样）' }
   else { Info '非管理员：跳过 ESP 与固件启动项检查（用 Install-40HXUnlock.ps1 -Mode Check 提权跑才完整）' }
@@ -2225,6 +2270,13 @@ function Install-Gsp {
   }
   # State = 'off'：写显示类子键
   $keys = @(Get-DisplayClassSubKeys)
+  # 2026-10-12（参考 Cyridd/cmpunlocker FORK_CHANGES #1）：硬件绑定 —— 仅名字命中（DriverDesc 含 "CMP 40HX" 但
+  #   MatchingDeviceId 不含 DEV_1F0B）的子键跳过不写并点名（告警+继续）：多卡/伪装驱动机器上单靠名字会把
+  #   EnableGpuFirmware 写到别的 NVIDIA 适配器上。真卡的权威子键由下面 Enum 反查（authIdx）兜底。
+  foreach ($k in @($keys | Where-Object { -not $_.HwBound })) {
+    Warn ('显示类子键 ' + $k.Name + ' [' + $k.DriverDesc + '] 名字像 CMP 40HX 但 MatchingDeviceId 不含 DEV_1F0B → 跳过不写（防护：避免误改别的 NVIDIA 适配器）')
+  }
+  $keys = @($keys | Where-Object { $_.HwBound })
   if ($keys.Count -eq 0) {
     Warn '没找到 CMP 40HX 的显示类子键（驱动没装全？）→ 退化只写 Services\nvlddmkm\Parameters（实测该处不生效）'
     Add-Action '没找到 40HX 的显示类子键：装好驱动后重跑 -Mode Repair，让 GSP 开关写到正确位置'

@@ -15,6 +15,7 @@ set "TMPCS=%TEMP%\40hx_bw.cs"
 set "TMPE=%TEMP%\40hx_bw.exe"
 set "TMPC=%TEMP%\40hx_bw_csc.log"
 set "TMPB=%TEMP%\40hx_bw.b64"
+set "TMPB1=%TEMP%\40hx_bar1.out"
 set "STAT=C:\ProgramData\40HXUnlock\gen2_status.txt"
 set "LOGP=C:\ProgramData\CMP40HXGen2\windows\logs\postbind.log"
 
@@ -137,6 +138,20 @@ if "%VBK%"=="2" echo     [!!] VBIOS Åú´Î : %VBV% = ÒÑÖª Prod Ç©ÃûÁ´±äÌå£¨¹Ì¼þ¾ÜÇ
 if "%VBK%"=="2" echo            ÒªËãÁ¦ÐèÏÈË¢ Debug °æ VBIOS£¨¸ß·çÏÕ£¬Ðè×¨ÓÃË¢»ú°ü£©-- ÕÒ°ü×÷Õß£»Ö»Òª Gen2 ¿ÉºöÂÔ±¾Ìõ
 if not defined VBV echo     [--] VBIOS Åú´Î : Ã»ÄÜÅÐ¶¨£¨nvidia-smi -q Ã»ÓÐ VBIOS ÐÐ?£©-- ²»Ó°ÏìÏÂÃæµÄÊµ²â
 if defined VBV if "%VBK%"=="0" echo     [--] VBIOS Åú´Î : %VBV% = Î´ÊÕÂ¼°æ±¾£¬ÒÔÊµ²âÎª×¼
+
+rem 2026-10-12£¨²Î¿¼ Cyridd/cmpunlocker #4£©£ºReBAR/BAR1 ¶Á³ö ¡ª¡ª NVIDIA ¿ØÖÆÃæ°å¶Ô 40HX ²»ÏÔÊ¾ ReBAR£»
+rem   Ö»¶ÁÉÏÃæÒÑÂäÅÌµÄ nvidia-smi -q ½á¹û£¨%TMPG%£©£¬ÁãÓ²¼þ´¥Åö¡¢²»¼ÆÈë½áÂÛÏî
+set "BAR1T="
+if exist "%TMPB1%" del "%TMPB1%" >nul 2>&1
+if exist "%TMPG%" powershell -NoProfile -Command "$q=[IO.File]::ReadAllText('%TMPG%');$m=[regex]::Match($q,'(?s)BAR1 Memory Usage.*?Total\s*:\s*(\d+)\s*MiB');if($m.Success){$m.Groups[1].Value}else{''}" > "%TMPB1%" 2>nul
+if exist "%TMPB1%" for /f "usebackq delims=" %%a in ("%TMPB1%") do set "BAR1T=%%a"
+if "%BAR1T%"=="" goto :bar1_unknown
+if %BAR1T% GEQ 8192 echo     [OK] ReBAR     : ÒÑÆôÓÃ£¨BAR1 = %BAR1T% MiB£¬ÏÔ´æ¿ÉÕû¿éÓ³Éä£©
+if %BAR1T% LSS 8192 echo     [--] ReBAR     : Î´ÆôÓÃ£¨BAR1 = %BAR1T% MiB£¬Ô­Éú¾ÍÊÇÕâ¸öÁ¿¼¶£©-- ÓÎÏ·Ó°Ïì¿ÉºöÂÔ²»ÓÃ¹Ü£»ÅÜAI/´óÏÔ´æ¸ºÔØÏë¿ª£ºBIOS Àï Above 4G Decoding + Resizable BAR ¶¼´ò¿ª£¨±¾°ü²»¸Ä ReBAR£¬Ö÷°å²»Ö§³Ö¾Í¿ª²»ÁË£¬ÊôÕý³££©
+goto :bar1_done
+:bar1_unknown
+echo     [--] ReBAR     : Ã»ÄÜÅÐ¶¨£¨nvidia-smi -q Ã»ÓÐ BAR1 ÐÐ?£©-- ²»Ó°ÏìÏÂÃæµÄÊµ²â
+:bar1_done
 
 echo [2/6] Çý¶¯Ä£Ê½   (WDDM = WSL Ö±Í¨¿ÉÓÃ)
 echo     µ±Ç° : %DMC%     ´ýÉúÐ§ : %DMP%
