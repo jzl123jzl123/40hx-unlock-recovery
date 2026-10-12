@@ -86,7 +86,7 @@ rem The new path (inpoutx64 + WinRing0) does NOT need ThrottleStop. Once loaded 
 rem pops up: "incompatible software loaded: C:\Windows\System32\drivers\ThrottleStop.sys" and the game will not start.
 rem (keep this file ASCII-only: cmd.exe parses it as GBK)
 rem Action: stop the service if running and set its start type to disabled so nothing loads it at boot.
-rem We do not delete the service or the file: the legacy fallback re-enables it inside the ACE-off window.
+rem We do not delete the service or the file: uninstall removes it. Packages from 2026-10-12 no longer deploy it.
 sc query ThrottleStop >nul 2>&1
 if not errorlevel 1 (
   sc query ThrottleStop | findstr /I "RUNNING" >nul 2>&1

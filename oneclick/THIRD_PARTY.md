@@ -28,7 +28,7 @@
 
 | 文件 | 用途 | 说明 |
 |---|---|---|
-| `ThrottleStop.sys` | 老路径（legacy）写 PCIe 配置空间 + 重训 | 本包默认**不让它加载**（ACE 会拦、也会弹"兼容性"提示）；仅作回退路径 |
+| `ThrottleStop.sys` | （历史）老路径写 PCIe 配置空间 + 重训 | **2026-10-12 起退役，不再随包分发/部署**（它一加载就触发 ACE 兼容性弹窗）；老版本装过的机器由开机脚本保持停用，卸载时清除 |
 | `WinRing0x64.sys` | 读/写 PCI 配置空间（v1.2.0.5） | 新路径在用 |
 | `inpoutx64.sys` + `inpoutx64.dll` | 读写 GPU BAR0（MMIO） | 新路径在用（Red Fox UK 签名） |
 
@@ -73,6 +73,7 @@
 | Windows 侧 helper：`payload\windows\Status.cmd`（另：`CMP40HXGen2.exe`、`AutoRetrain.cmd` 曾随包分发，2026-10-10 起已移除、不再分发） | 上游 **CMP40HX-Unlock-OnlyEFI v0.1.1** 发布包的 `windows\` 目录（其源码为包内 `source/windows/CMP40HXGen2_prod.c`） | 按原样分发（未重编译、未改写），本包只调用其命令行接口；与 OnlyEFI 发布包同名文件逐字节相同：`CMP40HXGen2.exe` md5 `1490de9bd90105e6ebc73e50abecc5cf`、`AutoRetrain.cmd` md5 `0021c1978b749ee7e55834e2aa7ef59a`、`Status.cmd` md5 `6e3f7dbd75d2e59fd824c195b7278477`（前两个 md5 为历史记录：一键包已移除；仓内上游原包存档 `payload/onlyefi-v0.1.1/` 与历史快照 `payload/windows-live/` 仍含，仅作来源证据） |
 | `payload\EFI\40HXUNLK.EFI`（OnlyEFI v0.1.1） | 上游 CMP40HX-Unlock-OnlyEFI | 按原样分发（安装器还会用 sha256 核对是不是这份固件） |
 | 一键包安装器、开机任务与多源自愈、首选路径 `40hx-retrain-inpout.ps1`、GSP 三态判定、状态自检与各修复工具、全部文档 | 本仓库自写（`Copyright (c) 2026 nie2100`，**保留所有权利**、禁止转售） | 上游没有这些；上游安装器（`40HXInstaller.exe`）本包**不调用** |
-| `ThrottleStop.sys` / `WinRing0x64.sys` / `inpoutx64.sys` / `inpoutx64.dll` | 各自原作者 | 自带数字签名，按 base64 文本原样分发 |
+| `WinRing0x64.sys` / `inpoutx64.sys` / `inpoutx64.dll` | 各自原作者 | 自带数字签名，按 base64 文本原样分发 |
+| `ThrottleStop.sys`（历史记录） | 原作者 | 曾按 base64 文本分发；2026-10-12 起退役，不再随包分发 |
 
 > 若你是上游作者／权利人或认为本文件记录有误，请提 issue：核实后我们立即修正、或按要求移除相应内容。

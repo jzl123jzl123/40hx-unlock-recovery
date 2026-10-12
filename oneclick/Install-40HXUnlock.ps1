@@ -10,8 +10,8 @@
   它做什么（全部由本脚本自己完成，不调用 CMP40HX-Unlock 厂商安装器：
   厂商安装器会把 ESP 上的 OnlyEFI 解锁固件覆盖掉，导致 Windows 侧 helper 守卫失败）：
     1. 前提体检：UEFI/GPT、Secure Boot、BitLocker、CMP 40HX 是否在位、GSP 是否开启、杀软
-    2. 驱动：ThrottleStop.sys + WinRing0x64.sys + inpoutx64.sys/.dll（base64 还原）→ System32\drivers + 多个自愈源
-             + 建服务 ThrottleStop / WinRing0_1_2_0
+    2. 驱动：WinRing0x64.sys + inpoutx64.sys/.dll（base64 还原）→ System32\drivers + 多个自愈源
+             + 建服务 WinRing0_1_2_0（ThrottleStop 已退役：2026-10-12 起不再部署/不建服务；老版本留下的由开机脚本保持停+禁用，卸载时清除）
              （inpoutx64 不建常驻服务：开机脚本自己 create/delete 临时服务 inpoutx64T）
     3. Windows 侧 helper：RunPostBind.cmd + 40hx-retrain-inpout.ps1 + ACE-Toggle.ps1（仅供治愈段用）→ %ProgramData%\CMP40HXGen2\windows
              唯一重训路径 = 40hx-retrain-inpout.ps1：inpoutx64 直写 MMIO + WinRing0 走 PCI 配置空间，
@@ -118,10 +118,15 @@ $script:ActionItems = New-Object System.Collections.ArrayList   # 跑完要"人"
 # OnlyEFI v0.1.1 解锁固件（EFI 阶段：算力解锁 + 4 个 TU106 Gen2 策略寄存器 + Root TLS=2，故意不重训）
 $script:EfiSha256 = '1e9ca43fab3d5ce851e8fcd09dc9be63282fbf3ce3828c3dbcdcbb21cf7ce1c7'
 $script:EfiSize = 590868
-# Windows 侧两个签名驱动（BYOVD 读写 PCI 配置空间用）
+# Windows 侧签名驱动（BYOVD 读写 PCI 配置空间用；ThrottleStop 已退役，见下方 $script:RetiredDrivers）
 $script:Drivers = @(
-  @{ Name = 'ThrottleStop.sys' ; Sha256 = '16f83f056177c4ec24c7e99d01ca9d9d6713bd0497eeedb777a3ffefa99c97f0' ; Service = 'ThrottleStop'    },
   @{ Name = 'WinRing0x64.sys'  ; Sha256 = '11bd2c9f9e2397c9a16e0990e4ed2cf0679498fe0fd418a3dfdac60b5c160ee5' ; Service = 'WinRing0_1_2_0' }
+)
+# 2026-10-12：ThrottleStop 退役 —— "停 ACE 降级链"已于 2026-10-10 移除，新路径（inpoutx64 + WinRing0）不需要它；
+#   它一旦加载进内核就会触发腾讯 ACE-BOOT 的兼容性弹窗。不再部署、不再建服务；
+#   老版本装过的机器：开机脚本（RunPostBind.cmd）每轮保持它 停 + disabled，卸载时按下面这张表清除。
+$script:RetiredDrivers = @(
+  @{ Name = 'ThrottleStop.sys' ; Sha256 = '16f83f056177c4ec24c7e99d01ca9d9d6713bd0497eeedb777a3ffefa99c97f0' ; Service = 'ThrottleStop' }
 )
 # 首选路径（2026-09-29 起）用的驱动：inpoutx64 —— 只铺文件，不建常驻服务
 #   inpoutx64.sys → System32\drivers（开机脚本用它 MMIO 读写 GPU BAR0）、两个 ProgramData 自愈目录
@@ -1349,7 +1354,7 @@ function Show-Check {
   } else { & $gspSev "nvidia-smi : 找不到 —— 先把 NVIDIA 驱动装好再解锁（没驱动就解锁 = 黑屏 + Code 43）"; Add-Action '机器上没有 nvidia-smi：先装 NVIDIA 驱动，再重跑 Install' }
   if ($Report.Vbios) { Info ('显卡 VBIOS : ' + $Report.Vbios + '   （批次不同 → Gen2 基线不同；本包按位判定，不是写死常量）') }
   if ($Report.Blocklist -eq '1') {
-    Warn '易受攻击驱动列表 : 开着（VulnerableDriverBlocklistEnable=1）—— 它/360/ACE 都可能把 ThrottleStop·WinRing0 的服务改成“禁用”，表现为老路径 sc start 失败 1058；本包每次开机都会自愈：WinRing0 启动类型纠正回 demand；ThrottleStop 则被停掉并禁用（它加载在内核里会被腾讯 ACE-BOOT 判为兼容性问题）'
+    Warn '易受攻击驱动列表 : 开着（VulnerableDriverBlocklistEnable=1）—— 它/360/ACE 都可能把 WinRing0 的服务改成“禁用”（客户机实测 Start=4 → sc start 失败 1058）；本包每次开机会把 WinRing0 启动类型纠正回 demand 自愈。ThrottleStop 已退役：不再部署，老机器上保持 停+禁用'
     Add-Action '易受攻击驱动列表开着：想彻底关掉（厂商安装器也关它）就用 reg add "HKLM\SYSTEM\CurrentControlSet\Control\CI\Config" /v VulnerableDriverBlocklistEnable /t REG_DWORD /d 0 /f 然后重启；不关也行，本包每次开机都会纠正服务启动类型'
   } else { Ok ('易受攻击驱动列表 : ' + $(if ($Report.Blocklist -eq '') { '未设置（按关处理）' } else { '已关（0）' })) }
   if ($Report.Hvci -eq '1') {
@@ -1365,13 +1370,12 @@ function Show-Check {
   Head '杀软 / 反作弊'
   if ($Report.Huorong) {
     Warn '检测到火绒 —— 必须在“信任区”加入下面这几项，否则驱动会被隔离、服务被删（自愈源可救，但会反复）'
-    Add-Action '火绒/其它杀软：把 README 第 1.1 节那几项加进信任区（System32\drivers 下 ThrottleStop.sys / WinRing0x64.sys / inpoutx64.sys 全路径 + C:\ProgramData\CMP40HXGen2 + 本包目录），并关掉它的“启动项保护”'
-    Info ('文件: ' + $script:SysDrv + '\ThrottleStop.sys')
+    Add-Action '火绒/其它杀软：把 README 第 1.1 节那几项加进信任区（System32\drivers 下 WinRing0x64.sys / inpoutx64.sys 全路径 + C:\ProgramData\CMP40HXGen2 + 本包目录；老版本装过的机器还有 ThrottleStop.sys，一并加），并关掉它的“启动项保护”'
     Info ('文件: ' + $script:SysDrv + '\WinRing0x64.sys')
     Info ('文件: ' + $script:SysDrv + '\inpoutx64.sys')
     Info ('目录: ' + $script:ProgDataRoot)
     Info ('目录: ' + $script:PkgRoot)
-    Info '安装时火绒大概率会弹一次 “Exploit/Vulndriver.ad” 拦截（这几个都是 BYOVD 类驱动，属预期）——按提示“信任/恢复”即可，脚本有 ESP 兜底源自愈'
+    Info '安装时火绒可能弹 “Exploit/Vulndriver.ad” 拦截（这几个都是 BYOVD 类驱动，属预期）——按提示“信任/恢复”即可，脚本有 ESP 兜底源自愈；最常被报的 ThrottleStop.sys 自 2026-10-12 起已不再部署（老版本装过的机器上它还在时才可能弹）'
   } else { Ok '未检测到火绒' }
   # 2026-10-01: 七彩虹 iGame Center 会占用 WinRing0_1_2_0 这个公用服务名（客户机实测）
   try {
@@ -1386,7 +1390,7 @@ function Show-Check {
     }
   } catch {}
 
-  if ($Report.AceBoot) { Warn '检测到腾讯 ACE-BOOT 反作弊（会在映像加载阶段拦 ThrottleStop.sys）—— 重训只走 inpoutx64 新路径，ACE-BOOT 全程不停（2026-10-10 起已移除“停ACE”降级链）；新路径失败只记日志，按 排查指引.md 第 2.3 节查 NewPath EXIT 码，无需手工关闭 ACE' }
+  if ($Report.AceBoot) { Warn '检测到腾讯 ACE-BOOT 反作弊（它拦的是老驱动 ThrottleStop.sys —— 本包 2026-10-12 起已不再部署）—— 重训只走 inpoutx64 新路径，ACE-BOOT 全程不停（2026-10-10 起已移除“停ACE”降级链）；新路径失败只记日志，按 排查指引.md 第 2.3 节查 NewPath EXIT 码，无需手工关闭 ACE' }
   else { Ok '未检测到 ACE-BOOT' }
 
   Head '现状'
@@ -1450,6 +1454,13 @@ function Show-Check {
     $q = (Invoke-Native { sc.exe query $d.Service 2>&1 } | Out-String)
     if ($q -match 'STATE\s+:\s+\d+\s+(\S+)') { Info ("服务 " + $d.Service + " = " + $Matches[1]) } else { Info ("服务 " + $d.Service + " 不存在") }
   }
+  # 2026-10-12：退役驱动（ThrottleStop）—— 不再部署；老机器上还留着的话保持 停+禁用 即可（卸载会清除）
+  foreach ($d in $script:RetiredDrivers) {
+    $q = (Invoke-Native { sc.exe query $d.Service 2>&1 } | Out-String)
+    if ($q -match 'STATE\s+:\s+\d+\s+(\S+)') { Info ("服务 " + $d.Service + " = " + $Matches[1] + "（退役件：保持 停+禁用 即可，卸载时清除）") } else { Info ("服务 " + $d.Service + " 不存在（退役件，本包不再部署）") }
+    $pr = Join-Path $script:SysDrv $d.Name
+    if (Test-Path $pr) { Info ($d.Name + " 还在 System32\drivers（退役件：不加载就无害；卸载会删）") }
+  }
   # 新路径（首选）需要的文件：inpoutx64.sys / inpoutx64.dll + 重训工具
   foreach ($f in $script:InpoutFiles) {
     $p = Join-Path $script:SysDrv $f.Name
@@ -1462,7 +1473,7 @@ function Show-Check {
   }
   $newTool = Join-Path $script:ProgDataWin '40hx-retrain-inpout.ps1'
   if (Test-Path $newTool) { Ok '新路径工具 40hx-retrain-inpout.ps1 已就位（开机不停 ACE-BOOT）' }
-  else { Info '新路径工具还没铺（没它时开机走旧路径 = 每次开机停一次 ACE-BOOT）' }
+  else { Info '新路径工具还没铺（没它 Gen2 修不上；跑 -Mode Repair 补上）' }
   $lastLog = Join-Path $script:ProgDataWin 'logs\last.log'
   if (Test-Path $lastLog) {
     $c = Get-Content -LiteralPath $lastLog
@@ -1642,8 +1653,8 @@ function Set-DriverSourceB64([string]$Dir, [string]$Name) {
 function Install-Hardening {
   Head '安全加固（驱动源改 base64 + 目录权限；都不删必要文件）'
   # 顺序：先"读源文件 → 写 .b64 → 校验 → 删裸文件"，再收紧目录权限（见下面第 1 步的说明）。
-  # 2026-10-01b（第三方审查）：ThrottleStop.sys **不**转 base64 —— 旧回退路径（legacy）靠它执行，
-  #   而自愈逻辑只认裸文件；转成 .b64 之后它就再也补不回来了。
+  # 2026-10-01b（第三方审查）：ThrottleStop.sys 不转 base64；2026-10-12 起它随降级链退役（不再部署），
+  #   老机器上留下的裸文件保持原样（不加载即无害，卸载时会清除）。
   # 2026-10-01b（第三方审查）：这段原来写了两遍（$names0/$names 同值，每个文件转两次），
   #   合并成一遍（幂等：第二次本来就只会报 already-b64，纯属冗余日志）。
   $names = @('WinRing0x64.sys', 'inpoutx64.sys', 'inpoutx64.dll')
@@ -1667,18 +1678,7 @@ function Install-Hardening {
     elseif ($r -like 'changed:*') { Ok ('已收紧目录权限: ' + $t.Path + '（ACL 备份: ' + $r.Substring(8) + '）') }
     else { Warn ('收紧目录权限失败: ' + $t.Path + ' → ' + $r + '（不影响解锁/Gen2，只是少了一层保护）'); Add-Action ('目录权限没收紧: ' + $t.Path + ' —— 可手工跑 icacls "' + $t.Path + '" /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX"') }
   }
-  # 若之前误把 ThrottleStop.sys 转成了 .b64（老版本行为），这里解回裸文件
-  foreach ($d2 in @($script:ProgDataDrv, (Join-Path $env:ProgramData '40HXUnlock\drivers'))) {
-    if (-not (Test-Path -LiteralPath $d2)) { continue }
-    $b64f = Join-Path $d2 'ThrottleStop.sys.b64'
-    $rawf = Join-Path $d2 'ThrottleStop.sys'
-    if ((Test-Path -LiteralPath $b64f) -and -not (Test-Path -LiteralPath $rawf)) {
-      try {
-        [IO.File]::WriteAllBytes($rawf, [Convert]::FromBase64String(((Get-Content -LiteralPath $b64f -Raw) -replace '[\r\n\s]', '')))
-        Ok ('已把 ThrottleStop.sys 解回裸文件（legacy 回退要用）: ' + $rawf)
-      } catch { Warn ('解回 ThrottleStop.sys 失败: ' + $_.Exception.Message) }
-    }
-  }
+  # 2026-10-12：ThrottleStop 已退役 —— 老版本留下的裸文件/.b64 都保持原样不动（不加载即无害；卸载时统一清除）
   Ok '加固完成：平时 ProgramData 里没有"可直接被加载"的驱动副本；需要时由 Unpack-Drivers.ps1 解码落地'
   Info '要退回这次加固：双击 工具-测试与修复\回滚-安全加固.cmd（恢复目录权限 + 写回裸驱动文件）'
 }
@@ -2753,16 +2753,19 @@ function Invoke-Uninstall {
     }
     if (-not (Get-ScheduledTask -TaskName $tn -ErrorAction SilentlyContinue)) { Ok ('已删除任务 ' + $tn) }
   }
-  foreach ($d in $script:Drivers) {
+  foreach ($d in (@($script:Drivers) + @($script:RetiredDrivers))) {
     Invoke-Native { sc.exe stop $d.Service 2>&1 | Out-Null }
     Invoke-Native { sc.exe delete $d.Service 2>&1 | Out-Null }
-    foreach ($p in @((Join-Path $script:SysDrv $d.Name), (Join-Path $script:ProgDataDrv $d.Name), (Join-Path $script:VendorDrvDir $d.Name))) {
+    # 2026-10-12（review30 中-1）：连 ProgramData 里的 .b64 源一起删（默认无 -Purge 时也不留残留）
+    foreach ($p in @((Join-Path $script:SysDrv $d.Name), (Join-Path $script:ProgDataDrv $d.Name), (Join-Path $script:VendorDrvDir $d.Name),
+                     (Join-Path $script:ProgDataDrv ($d.Name + '.b64')), (Join-Path $script:VendorDrvDir ($d.Name + '.b64')))) {
       if (Test-Path $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
     }
-    Ok ("已删除服务与驱动: " + $d.Service)
+    Ok ("已删除服务与驱动（含 .b64 源）: " + $d.Service)
   }
   foreach ($f in $script:InpoutFiles) {
-    foreach ($p in @((Join-Path $script:SysDrv $f.Name), (Join-Path $script:ProgDataDrv $f.Name), (Join-Path $script:VendorDrvDir $f.Name))) {
+    foreach ($p in @((Join-Path $script:SysDrv $f.Name), (Join-Path $script:ProgDataDrv $f.Name), (Join-Path $script:VendorDrvDir $f.Name),
+                     (Join-Path $script:ProgDataDrv ($f.Name + '.b64')), (Join-Path $script:VendorDrvDir ($f.Name + '.b64')))) {
       if (Test-Path $p) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
     }
     Ok ("已删除新路径驱动文件: " + $f.Name + "（新路径工具 40hx-retrain-inpout.ps1 在 " + $script:ProgDataWin + "，要一并删就加 -Purge）")
