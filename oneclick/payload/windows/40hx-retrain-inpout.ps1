@@ -1,15 +1,16 @@
-﻿param([switch]$Apply, [string]$GpuBdf = '', [string]$RootBdf = '', [switch]$NoAutoPrime, [switch]$AllowPrime, [string]$PciBackend = 'auto', [switch]$BatchCheck)
+﻿param([switch]$Apply, [string]$GpuBdf = '', [string]$RootBdf = '', [switch]$NoAutoPrime, [switch]$AllowPrime, [string]$PciBackend = 'auto', [switch]$BatchCheck, [switch]$DumpFuse)
 # 40HX Gen2 retrain via inpoutx64 (MMIO) + WinRing0 (PCI config).  The anti-cheat is NEVER touched.
 # exit codes: 0 = PASS (physical Gen2 x16), 10 = link not Gen2, 11 = baseline/guard failed,
 #             12 = GPU/driver not ready in time, 13 = inpoutx64 driver not running, 3 = WinRing0 unusable
 # 2026-10-11: -BatchCheck = 批次预检（安装器用；只读寄存器，不训练不写），exit: 0=unlockable 20=locked 21=unknown/读失败
+# 2026-10-12: -DumpFuse = fuse 窗口只读快照（采样 Prod 卡 fuse 差异用；纯读、任何异常只告警不中断）。
 # 2026-09-30: GPU/root-port BDF are AUTO-DETECTED (PnP LocationInfo -> nvidia-smi -> legacy 01:00.0).
 #             The old build hardcoded 01:00.0 / 00:01.0, so on any machine where the card sits elsewhere
 #             (2nd slot, behind a switch, AGESA/high-bus boards - vendor README reports bus 0x10)
 #             it waited the full 120s and exited 12 on every boot. -GpuBdf/-RootBdf override (hex like 0x0200).
 $ErrorActionPreference='Continue'
 # 工具版本号：必须在使用点之前定义（2026-10-01 修正：原先定义在文件后半段，banner 里的 ver= 一直是空的）
-$TOOL_VER = '20261004e'
+$TOOL_VER = '20261012a'
 # 2026-10-02（用户要求：解锁状态正常了就别再堆日志）：完整读数写 retrain-last.log —— **每次运行覆盖**，
 #   不再像老版那样每开机往 retrain-inpout.log 追加一份（那个文件只增不减，一个月长到 200+ KB）。
 #   要留档请在覆盖前拷走；开机任务会把失败那次的全量日志另存到 logs\failures\。
@@ -818,8 +819,25 @@ W("  LINK_CONFIG_0 = " + $(if($lc0 -eq $null){'READ FAILED'}else{'0x'+$lc0.ToStr
 W("  PRIV_MISC_1   = " + $(if($pm1 -eq $null){'READ FAILED'}else{'0x'+$pm1.ToString('X8')}) + "   (Gen2位=bit13: 1=Gen2态; bit11/bit14=批次跳线位,原样保留; 族基准 0xE0B40500)")
 W("  SS0           = " + $(if($ss0 -eq $null){'READ FAILED'}else{'0x'+$ss0.ToString('X8')}) + "   (0x88888888 = compute unlocked)")
 
+# ---- 2026-10-12: fuse 窗口只读快照（-DumpFuse；给"Prod 卡 fuse 烧没烧死"攒样本）----
+# 依据 nouveau gf100/gm107 fuse 读法：Turing 直读 BAR0+0x21100+addr（gf100 的 0x22400/0x21000 使能步骤 Turing 不需要）；
+# 0x21000/0x22400 是控制/使能寄存器，一并读出。纯读、落在已登记的 BAR0 窗口内（16MB），任何异常只告警不中断。
+# 注意：PLM 上锁后部分 fuse 可能读回 0x0 / 0xbad0xxxx —— 读回什么原样记什么，"被屏蔽"本身也是数据。
+if($DumpFuse){
+  try {
+    W("  --- FUSE window dump（BAR0+0x21000..0x22000 只读；每行 8 个 dword）---")
+    $fc0=MmioRead ([uint64]($bar+0x21000)); $fce=MmioRead ([uint64]($bar+0x22400))
+    W("  FUSE[0x00021000] = " + $(if($fc0 -eq $null){'READ_FAILED'}else{'0x'+$fc0.ToString('X8')}) + "   FUSE[0x00022400] = " + $(if($fce -eq $null){'READ_FAILED'}else{'0x'+$fce.ToString('X8')}))
+    for($fo=0x21100; $fo -lt 0x22000; $fo+=32){
+      $vals=@()
+      for($k=0; $k -lt 8; $k++){ $v=MmioRead ([uint64]($bar+$fo+4*$k)); if($v -eq $null){$vals+='READ_FAIL'}else{$vals+=$v.ToString('X8')} }
+      W(("  FUSE[0x{0:X8}] = {1}" -f [uint32]$fo, ($vals -join ' ')))
+    }
+    W("  --- FUSE window dump end ---")
+  } catch { W("  [fuse] 采样异常（已跳过，不影响主流程）: " + $_.Exception.Message) }
+}
 # ---- 2026-10-11: 批次预检（安装器调用；只读，不写任何寄存器、不训练、不动驱动状态）----
-# 判定只看 POST 初态 SS0 形态（0x02020004=已知可解锁 / 0x20000010=已知锁死 / 0x88888888=本次已解锁），
+# 判定只看 POST 初态 SS0 形态（0x02020004=已知可解锁 / 0x10000010=已知可解锁(.06 Prod 1例实证 2026-10-12) / 0x20000010=已知锁死 / 0x88888888=本次已解锁），
 # 不做写入探测 —— 写入回读不能区分批次（可解锁的 .04 卡探测写同样不生效，解锁靠 booter）。
 if($BatchCheck){
   $fmt={param($v) if($v -eq $null){'READ_FAILED'}else{'0x'+$v.ToString('X8')}}
@@ -830,6 +848,7 @@ if($BatchCheck){
   $h0 = (& $fmt $ss0)
   if($h0 -eq '0x88888888'){ $bc='unlockable' }
   elseif($h0 -eq '0x02020004'){ $bc='unlockable' }
+  elseif($h0 -eq '0x10000010'){ $bc='unlockable' }   # 2026-10-12: Z370 客户机 .06 Prod 实证可解（1 例）
   elseif($h0 -eq '0x20000010'){ $bc='locked' }
   W("  BATCH_SS0=" + (& $fmt $ss0) + " BATCH_SS1=" + (& $fmt $ss1v) + " BATCH_PLM=" + (& $fmt $plmv) + " BATCH_LC0=" + (& $fmt $lc0) + " BATCH_PM1=" + (& $fmt $pm1) + " BATCH_PLR=" + (& $fmt $plrv) + " BATCH_LNKCAP=" + $(if($glv -eq $null){'READ_FAILED'}else{'0x'+([uint32]$glv).ToString('X8')}))
   W("  BATCH_VERDICT=" + $bc)

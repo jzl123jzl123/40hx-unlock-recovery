@@ -3012,7 +3012,7 @@ if ($Mode -eq 'Install') {
   if ($vbBatch.Channel -eq 'Debug') {
     Info ('VBIOS 批次预检：' + $rep.Vbios + ' = Debug 签名链（算力+Gen2 都在可解范围）')
   } elseif ($vbBatch.Channel -eq 'Prod') {
-    Warn ('VBIOS 批次预检：' + $rep.Vbios + ' = 已知 Prod 签名链变体（EFI 注入被固件拒签，算力 2 例实证无解；Gen2 视机器可经 Windows 侧落地）')
+    Warn ('VBIOS 批次预检：' + $rep.Vbios + ' = 已知 Prod 签名链变体（同变体已实证 2 例拒签、1 例可解，算力以实测为准；Gen2 视机器可经 Windows 侧落地）')
     Warn '  注意：.06 存在多个内容变体，个别变体未收录 —— 最终判定以下面寄存器级批次预检为准'
     Warn '  要算力的唯一出路是刷 Debug 版 VBIOS（高风险操作，需专用刷机包：多源备份 + 一键回滚）—— 找包作者'
     Add-Action 'VBIOS 是 Prod 批次（算力大概率不可解，以寄存器级预检为准）：要算力先刷 Debug 版 VBIOS；只想要 Gen2 可忽略本条继续装'

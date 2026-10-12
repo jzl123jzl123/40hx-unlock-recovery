@@ -33,7 +33,7 @@ if (-not $__adm) {
   }
   exit $p.ExitCode
 }
-$wantVer = '20261004e'
+$wantVer = '20261012a'
 $src = Join-Path (Split-Path -Parent $here) 'payload\windows\40hx-retrain-inpout.ps1'
 $dst = "$env:ProgramData\CMP40HXGen2\windows\40hx-retrain-inpout.ps1"
 $desk = [Environment]::GetFolderPath('Desktop'); if (-not $desk) { $desk = 'C:\Users\Public\Desktop' }

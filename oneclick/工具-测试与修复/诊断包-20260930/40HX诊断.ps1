@@ -39,6 +39,30 @@ function Get-BdfFromLoc {
   return [pscustomobject]@{ Bus = $b; Dev = $dv; Fn = $fn; Hex = ('0x' + ('{0:X4}' -f (($b -shl 8) -bor ($dv -shl 3) -bor $fn))) }
 }
 
+function ProblemText {
+  param([string]$code)
+  # 2026-10-12（用户要求）：把设备管理器状态码翻成人话（口径同 状态自检.bat；按微软 Device Manager problem codes）
+  switch ([string]$code) {
+    '0'  { return '工作正常（没有黄色感叹号）' }
+    '1'  { return '设备未安装或未正确配置 —— 重装显卡驱动' }
+    '3'  { return '驱动损坏或系统资源不足 —— 重装显卡驱动' }
+    '10' { return '设备无法启动 —— 驱动没加载或损坏: 重装驱动; 不行就完全关机冷启动' }
+    '12' { return '分不到 PCI 地址空间（资源不足）—— 多卡/老平台先开 BIOS 的 Above 4G Decoding, 或换插槽' }
+    '14' { return '改了配置要重启 —— 完全关机再开机一次' }
+    '18' { return '需要重装驱动 —— 重装 NVIDIA 显卡驱动' }
+    '19' { return '注册表配置不完整或损坏 —— 重装驱动, 依旧则用 DDU 清干净再装' }
+    '21' { return '系统正在移除该设备（临时状态）—— 重启一次即可' }
+    '22' { return '这张卡被禁用了 —— 设备管理器里右键它 → 启用设备' }
+    '24' { return '设备不在位或驱动没装全 —— 查插槽/供电/金手指, 并重装驱动' }
+    '28' { return '驱动没装 —— 装 NVIDIA 显卡驱动' }
+    '31' { return '驱动加载失败 —— 驱动损坏或被杀软拦下: 重装驱动 + 把驱动加进信任区' }
+    '43' { return '驱动报告了问题并停用了这张显卡（解锁固件跑过之后最常见）' }
+    '45' { return '设备当前不在位 —— 插槽/供电/金手指接触不良, 或卡已掉' }
+    '52' { return '驱动数字签名验不过 —— 驱动被改动或被杀软动过: 重装官方驱动' }
+    default { return '未收录的状态码（把这一行原样发回即可）' }
+  }
+}
+
 function SvcStateHint {
   param([string]$n)
   try { $q = (sc.exe query $n 2>&1 | Out-String); if ($q -match 'STATE\s*:\s*\d+\s+(\S+)') { return $Matches[1] } } catch { }
@@ -155,6 +179,31 @@ Sec '0. 速判（自动判定，先看这里）' {
     Ln '     写到了 HKLM\SYSTEM\CurrentControlSet\Services\nvlddmkm\Parameters（驱动不读这里），'
     Ln '     正确位置是 显示类子键 ...\Control\Class\{4d36e968-...}\<000X>（就是上面"权威显示类子键"那个）。'
     Ln '     一键包 2026-09-30 起已修：写对位置 + 关快速启动；跑 -Mode Repair 后**完全关机**再开机。'
+  }
+  # 2026-10-12（用户要求）：显卡的“设备管理器状态码”提到速判里 —— 有些客户的卡解不开算力、跑过开机解锁固件后进系统
+  #   就报代码 43；光看下面各节的原始行不好抓，这里给它独立判据 + 含义 + 自救办法（$d40 上面已经取到，不额外查一遍）。
+  Ln ''
+  Ln '[判据 A2] 显卡设备状态码（设备管理器里那个黄色感叹号 / ProblemCode）'
+  if ($d40) {
+    $p40 = ''
+    try { $p40 = [string](Get-PnpDeviceProperty -InstanceId $d40.InstanceId -KeyName 'DEVPKEY_Device_ProblemCode' -ErrorAction SilentlyContinue).Data } catch { }
+    KV '设备名' ([string]$d40.FriendlyName + '  [' + $d40.Status + ']')
+    KV '设备状态码' $(if ($p40 -eq '0') { '0 = ' + (ProblemText '0') } elseif ($p40) { $p40 + ' = ' + (ProblemText $p40) } else { '读不到（以 nvidia-smi 与第 2 节为准）' })
+    if ($p40 -and $p40 -ne '0') {
+      Ln ('   → 判定：这张卡当前不是正常状态（状态码 ' + $p40 + '）。有码时驱动没在正常工作，算力/带宽类实测必然测不通，也就解不了算力 —— 先把这个码修掉。')
+      if ($p40 -eq '43') {
+        Ln '     代码 43 的处理顺序（先做 [0]，本机实测有效，一条就多半能好）：'
+        Ln '     [0] 设备管理器 → 显示适配器 → 右键 CMP 40HX → 禁用设备 → 等 3~5 秒 → 再右键 → 启用设备；'
+        Ln '        做完 43 立刻消失、卡马上能用（不用重装、不用卸载本包）。'
+        Ln '        ！禁用/启用等于把显卡复位一次，解锁态（易失寄存器）可能被清 —— 启用后必须【完全关机】再开机，'
+        Ln '          然后跑 状态自检.bat 复核 [4/5] 算力（开机解锁固件会重新写寄存器）。'
+        Ln '     ① 根因一（最常见）：双击 GSP体检.cmd 看 GSP 是否启用 —— GSP 未启用 = 解锁后必然 43；修好后【完全关机】再开机。'
+        Ln '     ② 根因二：看本报告第 7 节的 ESP 40hx_log.txt —— 有 UNLOCKED = 解锁成功、43 另有原因；'
+        Ln '        只有 abort / SS0=0 = 这张卡过不了固件守卫（见 排查指引.md 第 5.1c 节，需卸载本包）。'
+      }
+    }
+  } else {
+    Ind '没匹配到 40HX 显示设备（驱动没装 / 卡不在位 / 已被移除）'
   }
   # 判据 B：显卡拓扑
   $inst40 = ''
