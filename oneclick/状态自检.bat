@@ -197,6 +197,7 @@ if not defined VBV echo     [--] VBIOS 批次 : 没能判定（nvidia-smi -q 没有 VBIOS
 if defined VBV if "%VBK%"=="0" echo     [--] VBIOS 批次 : %VBV% = 未收录版本，以实测为准
 
 rem 2026-10-12（参考 Cyridd/cmpunlocker #4）：ReBAR/BAR1 读出 —— NVIDIA 控制面板对 40HX 不显示 ReBAR；
+rem 2026-10-14：本包已内置 ReBAR（一键解锁40HX.bat 选项 2 → ReBAR 版 EFI 设第一启动项），口径随之更新
 rem   只读上面已落盘的 nvidia-smi -q 结果（%TMPG%），零硬件触碰、不计入结论项
 set "BAR1T="
 if exist "%TMPB1%" del "%TMPB1%" >nul 2>&1
@@ -204,7 +205,7 @@ if exist "%TMPG%" powershell -NoProfile -Command "$q=[IO.File]::ReadAllText('%TM
 if exist "%TMPB1%" for /f "usebackq delims=" %%a in ("%TMPB1%") do set "BAR1T=%%a"
 if "%BAR1T%"=="" goto :bar1_unknown
 if %BAR1T% GEQ 8192 echo     [OK] ReBAR     : 已启用（BAR1 = %BAR1T% MiB，显存可整块映射）
-if %BAR1T% LSS 8192 echo     [--] ReBAR     : 未启用（BAR1 = %BAR1T% MiB，原生就是这个量级）-- 游戏影响可忽略不用管；跑AI/大显存负载想开：BIOS 里 Above 4G Decoding + Resizable BAR 都打开（本包不改 ReBAR，主板不支持就开不了，属正常）
+if %BAR1T% LSS 8192 echo     [--] ReBAR     : 未启用（BAR1 = %BAR1T% MiB，原生就是这个量级）-- 游戏影响可忽略不用管；跑AI/大显存负载想开：BIOS 里 Above 4G Decoding + Resizable BAR 都打开（开法：双击 一键解锁40HX.bat 选 2 —— 本包自己就能开，走 EFI 阶段配 XVE + 桥窗口，主板不支持就开不了，属正常）
 goto :bar1_done
 :bar1_unknown
 echo     [--] ReBAR     : 没能判定（nvidia-smi -q 没有 BAR1 行?）-- 不影响下面的实测

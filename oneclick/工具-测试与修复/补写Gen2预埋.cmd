@@ -3,7 +3,7 @@ chcp 936 >nul
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 title 40HX Gen2 预埋补写
-rem ---- 2026-10-05: preflight + self-elevation (same pattern as 一键安装.cmd) -------------------
+rem ---- 2026-10-05: preflight + self-elevation (same pattern as 一键解锁40HX.bat) -------------------
 rem Single line + label at EOF on purpose: a parenthesised block breaks when the folder name
 rem   contains ) or & (Windows unpacks twice -> "xxx (1)"). Never leave a bare "if" with no command:
 rem   cmd aborts the whole script with 255 (that is what made the old dry.cmd flash and close).

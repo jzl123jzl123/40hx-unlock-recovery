@@ -75,6 +75,6 @@ foreach ($d in @('C:\ProgramData\CMP40HXGen2\drivers', 'C:\ProgramData\40HXUnloc
 if ($wrote -eq 0) { T '  没有需要写回的（裸文件本来就在，或源目录里没有 .b64）' }
 
 T ''
-if ($fail -eq 0) { T '回滚完成。建议再跑一次 一键安装.cmd → 修复，并重启验证 Gen2。' 'Green'; exit 0 }
+if ($fail -eq 0) { T '回滚完成。建议再跑一次 一键解锁40HX.bat → 修复，并重启验证 Gen2。' 'Green'; exit 0 }
 T ('回滚没完全成功：' + $fail + ' 项失败（见上面的 [!!] 行）。把这段输出拍给经销商。') 'Yellow'
 exit 1

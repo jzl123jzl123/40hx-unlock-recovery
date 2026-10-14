@@ -1790,7 +1790,7 @@ function Install-WindowsFiles {
   $sumFile = Join-Path $script:PayloadDir 'sha256.txt'
   if (-not (Test-Path -LiteralPath $sumFile)) {
     Warn '包里没有 payload\sha256.txt —— 无法校验 helper 完整性，本次不拷贝 helper（重新解压一份完整包再装）'
-    Add-Action 'payload\sha256.txt 缺失：重新解压完整包后跑一次 一键安装.cmd'
+    Add-Action 'payload\sha256.txt 缺失：重新解压完整包后跑一次 一键解锁40HX.bat'
   } else {
     try {
       foreach ($ln in @(Get-Content -LiteralPath $sumFile -ErrorAction Stop)) {
@@ -1800,11 +1800,11 @@ function Install-WindowsFiles {
       if ($wantMd5.Count -eq 0) {
         # 2026-10-05（审查 r6 M1）：清单里一条都解析不出来 = 格式被改/被杀软动过 → 明确告警，别静默降级
         Warn 'payload\sha256.txt 一条都没解析出来（格式不对或被杀软改过）—— 本次不拷贝 helper；重新解压一份完整包'
-        Add-Action 'payload\sha256.txt 解析为 0 条：重新解压完整包后跑 一键安装.cmd'
+        Add-Action 'payload\sha256.txt 解析为 0 条：重新解压完整包后跑 一键解锁40HX.bat'
       }
     } catch {
       Warn ('读不了 payload\sha256.txt: ' + $_.Exception.Message + ' —— 本次不拷贝 helper（无法校验完整性）')
-      Add-Action 'payload\sha256.txt 读不了（杀软/权限）：重新解压后跑 一键安装.cmd'
+      Add-Action 'payload\sha256.txt 读不了（杀软/权限）：重新解压后跑 一键解锁40HX.bat'
       $wantMd5 = @{}
     }
   }
@@ -1824,7 +1824,7 @@ function Install-WindowsFiles {
     $key = 'windows/' + $f
     if (-not $wantMd5.ContainsKey($key)) {
       Warn ($f + ' 在 payload\sha256.txt 里没有条目 —— 跳过（不写未校验的 helper）；重新解压一份完整包再装')
-      Add-Action ($f + ' 缺清单条目：重新解压完整包后跑 一键安装.cmd')
+      Add-Action ($f + ' 缺清单条目：重新解压完整包后跑 一键解锁40HX.bat')
       Bad ($f + ' 缺清单条目，未安装')
       continue
     }
@@ -1836,7 +1836,7 @@ function Install-WindowsFiles {
   }
   if ($tamperedSrc.Count -gt 0) {
     Bad ('这些 helper 包内内容与清单不符，已跳过: ' + ($tamperedSrc -join ', ') + ' —— 重新解压一份完整包再装')
-    Add-Action ('helper 载荷校验不符（' + ($tamperedSrc -join ', ') + '）：重新解压一份包再跑 一键安装.cmd')
+    Add-Action ('helper 载荷校验不符（' + ($tamperedSrc -join ', ') + '）：重新解压一份包再跑 一键解锁40HX.bat')
   }
   if ($tamperedDst.Count -gt 0) {
     Bad ('这些 helper 源文件没问题、写进目标后内容又变了: ' + ($tamperedDst -join ', ') + ' —— 重跑 -Mode Repair；仍如此请把日志发回')
@@ -1883,7 +1883,7 @@ function Install-WindowsFiles {
   $tplKey = 'windows/RunPostBind.cmd'
   if (-not $wantMd5.ContainsKey($tplKey)) {
     Warn 'RunPostBind.cmd 在 payload\sha256.txt 里没有条目 —— 跳过本次重写（不写未校验的文件）；重新解压一份完整包'
-    Add-Action 'RunPostBind.cmd 缺清单条目：重新解压完整包后跑 一键安装.cmd'
+    Add-Action 'RunPostBind.cmd 缺清单条目：重新解压完整包后跑 一键解锁40HX.bat'
     $tplOk = $false
   }
   else {
@@ -2006,7 +2006,7 @@ function Install-Efi {
   if (-not $espRoot) {
     $hint = 'ESP 挂载失败（需要管理员；或 ESP 被 BitLocker/其他工具占用）'
     if ($script:EspMountError) { $hint += ' ; mountvol 报: ' + $script:EspMountError }
-    $tip = '① 必须是管理员窗口（一键安装.cmd 会自动提权）；② 手动敲 mountvol 看有没有卷被占用；③ BitLocker 开着会挂不上，先暂停；④ 虚拟机/WSL 里跑不了，要在真机 Windows 上跑'
+    $tip = '① 必须是管理员窗口（一键解锁40HX.bat 会自动提权）；② 手动敲 mountvol 看有没有卷被占用；③ BitLocker 开着会挂不上，先暂停；④ 虚拟机/WSL 里跑不了，要在真机 Windows 上跑'
     Fail $hint $script:ExitHash $tip
   }
   # 2026-10-10（审查 A2）：先验 ESP 剩余空间（固件 590KB + 兜底驱动源约 400KB）—— 不够就别动手，
@@ -2873,7 +2873,7 @@ Say ('#  时间  : ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '   管理员:
 Say '################################################################'
 
 if (-not $isAdmin -and $Mode -ne 'Check' -and $Mode -ne 'StorageDiag') {
-  Fail '这个模式需要管理员权限：请右键“以管理员身份运行”一键安装.cmd（或 Start-Process powershell -Verb RunAs）' $script:ExitPrereq '双击 一键安装.cmd 会自动提权；直接右键 Install-40HXUnlock.ps1 →「使用 PowerShell 运行」不会提权'
+  Fail '这个模式需要管理员权限：请右键“以管理员身份运行”一键解锁40HX.bat（或 Start-Process powershell -Verb RunAs）' $script:ExitPrereq '双击 一键解锁40HX.bat 会自动提权；直接右键 Install-40HXUnlock.ps1 →「使用 PowerShell 运行」不会提权'
 }
 
 if ($Mode -eq 'Check') {

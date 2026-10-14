@@ -40,7 +40,7 @@ if (-not $disk) { Bad '读不到系统盘信息（Storage 接口坏了）—— 
 $style = [string]$disk.PartitionStyle
 $dn = $disk.Number
 Info ('系统盘: 磁盘 ' + $dn + '（' + [string]$disk.FriendlyName + '）  当前样式: ' + $style)
-if ($style -eq 'GPT') { Ok '系统盘已经是 GPT —— 不需要转换。直接去跑 一键安装.cmd 即可'; exit 0 }
+if ($style -eq 'GPT') { Ok '系统盘已经是 GPT —— 不需要转换。直接去跑 一键解锁40HX.bat 即可'; exit 0 }
 if ($style -ne 'MBR') { Bad ('系统盘样式不是 MBR 也不是 GPT（' + $style + '）—— 不属本工具处理范围'); exit 1 }
 
 # ---- 2) 预检 ----
@@ -155,7 +155,7 @@ Say '  接下来（缺一步都不行）：' 'Yellow'
 Say '  1. 重启，开机猛按 Del/F2 进 BIOS' 'Yellow'
 Say '  2. 引导模式改成 UEFI（关掉 CSM / Legacy）；Secure Boot 保持关闭' 'Yellow'
 Say '  3. 保存退出。能正常进 Windows = 成功；进不去 = 第 2 步没改对，再进 BIOS 检查' 'Yellow'
-Say '  4. 进了 Windows 之后，双击 一键安装.cmd 开始装 40HX 解锁' 'Yellow'
+Say '  4. 进了 Windows 之后，双击 一键解锁40HX.bat 开始装 40HX 解锁' 'Yellow'
 Say ''
 # 写一份到桌面，重启后也能看
 try {
@@ -167,7 +167,7 @@ MBR→GPT 转换已完成（mbr2gpt 官方工具）。接下来：
 1. 重启进 BIOS（开机按 Del/F2）
 2. 引导模式：Legacy/CSM 改成 UEFI；Secure Boot 保持关；Above 4G Decoding 开
 3. 保存退出，能进 Windows 就成功
-4. 进 Windows 后双击 40HX 包里的 一键安装.cmd
+4. 进 Windows 后双击 40HX 包里的 一键解锁40HX.bat
 
 进不去系统别慌：数据没丢，再进 BIOS 检查引导模式是不是 UEFI。
 '@

@@ -1,8 +1,9 @@
-40hx-unlock-recovery / 40hx-oneclick — 授权说明（两部分，请分开对照）
+﻿40hx-unlock-recovery / 40hx-oneclick — 授权说明（两部分，请分开对照）
 
 Copyright (c) 2026 nie2100                                                  （本仓库自写部分，保留所有权利）
 Copyright (c) 2026 the CMP40HX-Unlock authors (GitHub: PZH1gdmu)            （上游，MIT）
 Copyright (c) 2026 the CMP40HX-Unlock-OnlyEFI authors (GitHub: BardKing-CN) （上游，MIT）
+Copyright (c) 2026 Cyridd                                             （上游，MIT）
 
 ================================================================================
 第一部分  本仓库自写部分：保留所有权利（禁止转售）
@@ -23,9 +24,11 @@ Copyright (c) 2026 the CMP40HX-Unlock-OnlyEFI authors (GitHub: BardKing-CN) （�
 第二部分  上游部分：MIT（授权永久有效，且不因第一部分而改变）
 ================================================================================
 
-范围：来自 **CMP40HX-Unlock**（GitHub: PZH1gdmu）与 **CMP40HX-Unlock-OnlyEFI**（GitHub: BardKing-CN）
+范围：来自 **CMP40HX-Unlock**（GitHub: PZH1gdmu）、**CMP40HX-Unlock-OnlyEFI**（GitHub: BardKing-CN）
+与 **cmpunlocker**（GitHub: Cyridd）
 的代码与二进制（含 `40HXUNLK.EFI`、`Status.cmd` 等；`CMP40HXGen2.exe`、`AutoRetrain.cmd` 曾随一键包分发，2026-10-10 起已随"停 ACE 降级链"从一键包移除、不再随包分发 —— 仓内 `payload/onlyefi-v0.1.1/` 上游原包存档与 `payload/windows-live/` 历史快照仍含这两个文件，仅作来源证据/历史记录），
-以及本仓库对它们的修改。这些部分按 **MIT** 提供 —— 其原始版权声明与许可全文就在下面
+以及本仓库对它们的修改（含 `payload\EFI\40HXUNLK-REBAR.EFI`：以 cmpunlocker 的 `unlock40x_v70.c` 为基线编译）。
+这些部分按 **MIT** 提供 —— 其原始版权声明与许可全文就在下面
 （MIT 要求随副本保留版权声明与许可文本，故一并放在本文件里）。
 
 逐项来源与衍生边界见 `THIRD_PARTY.md`。
@@ -36,6 +39,7 @@ MIT License  （上游部分 / upstream components）
 
 Copyright (c) 2026 the CMP40HX-Unlock authors (GitHub: PZH1gdmu)
 Copyright (c) 2026 the CMP40HX-Unlock-OnlyEFI authors (GitHub: BardKing-CN)
+Copyright (c) 2026 Cyridd
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -63,6 +67,9 @@ SOFTWARE.
                             MIT, Copyright (c) 2026
   * CMP40HX-Unlock-OnlyEFI  https://github.com/BardKing-CN/CMP40HX-Unlock-OnlyEFI
                             MIT, Copyright (c) 2026
+  * cmpunlocker             https://github.com/Cyridd/cmpunlocker
+                            MIT, Copyright (c) 2026 Cyridd
+                            (re-verified 2026-10-14; LICENSE sha 5f79cc347f6fdcfa524481626346533534f659d9)
 
 The upstream CMP40HX-Unlock repository/account is no longer reachable (GitHub API
 returns 404, checked 2026-10-10). Its MIT grant was public and is perpetual and

@@ -33,7 +33,7 @@ if (-not $__adm) {
   }
   exit $p.ExitCode
 }
-$wantVer = '20261012a'
+$wantVer = '20261014a'
 $src = Join-Path (Split-Path -Parent $here) 'payload\windows\40hx-retrain-inpout.ps1'
 $dst = "$env:ProgramData\CMP40HXGen2\windows\40hx-retrain-inpout.ps1"
 $desk = [Environment]::GetFolderPath('Desktop'); if (-not $desk) { $desk = 'C:\Users\Public\Desktop' }
@@ -76,11 +76,11 @@ if ($toolsrc) {
   if ($txtInst -match ('TOOL_VER = ' + [char]39 + [regex]::Escape($wantVer) + [char]39)) {
     T '  [1/3] 包里没带工具；机器上已装的那份版本正确（' + $wantVer + '）' 'Yellow'
   } else {
-    T ('  [X] 包里没带工具，机器上已装的那份也不是 ' + $wantVer + ' —— 先双击 一键安装.cmd 更新工具，再跑本工具') 'Red'
+    T ('  [X] 包里没带工具，机器上已装的那份也不是 ' + $wantVer + ' —— 先双击 一键解锁40HX.bat 更新工具，再跑本工具') 'Red'
     Save; exit 1
   }
 } else {
-  T '  [X] 找不到 40hx-retrain-inpout.ps1（包里和 ProgramData 里都没有）—— 先跑一次 一键安装.cmd' 'Red'; Save; exit 1
+  T '  [X] 找不到 40hx-retrain-inpout.ps1（包里和 ProgramData 里都没有）—— 先跑一次 一键解锁40HX.bat' 'Red'; Save; exit 1
 }
 T ('  工具: ' + $dst)
 

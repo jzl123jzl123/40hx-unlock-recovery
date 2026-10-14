@@ -35,7 +35,7 @@ $dst  = "$env:ProgramData\CMP40HXGen2\windows\40hx-retrain-inpout.ps1"
 # 2026-10-02：新工具把完整读数写 retrain-last.log（每次覆盖，不再无限增长）；老机器上可能还有老的追加日志
 $rlog = "$env:ProgramData\CMP40HXGen2\windows\logs\retrain-last.log"
 $rlogOld = "$env:ProgramData\CMP40HXGen2\windows\logs\retrain-inpout.log"
-$wantVer = '20261012a'  # 必须与 payload 里工具的 TOOL_VER 一致（工具版本门禁 20261004d：LC0 族掩码放宽 + ROOT LNKCAP 读数 + PRIMER_GAPS 标记）
+$wantVer = '20261014a'  # 必须与 payload 里工具的 TOOL_VER 一致（工具版本门禁 20261004d：LC0 族掩码放宽 + ROOT LNKCAP 读数 + PRIMER_GAPS 标记）
 $desk = [Environment]::GetFolderPath('Desktop')
 if (-not $desk) { $desk = 'C:\Users\Public\Desktop' }
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -279,7 +279,7 @@ if ($gapLine) {
   if ($gapLine -notmatch '（无') {
     T '  >>> 这台机器的 Gen2 前提值没被解锁固件预埋（缺口见上）—— 再跑本工具也不会到 Gen2。' 'Yellow'
     T '      下一步（二选一）：' 'Yellow'
-    T '       ① 重跑 一键安装.cmd 让解锁固件在 EFI 阶段重新预埋 → 完全关机再开机 → 再跑本工具；' 'Yellow'
+    T '       ① 重跑 一键解锁40HX.bat 让解锁固件在 EFI 阶段重新预埋 → 完全关机再开机 → 再跑本工具；' 'Yellow'
     T '       ② 若开机后缺口还在（固件自己 abort / 换了平台批次）→ 双击 工具-测试与修复\补写Gen2预埋.cmd（先把原值落盘再补写）。' 'Yellow'
   }
 }
@@ -311,7 +311,7 @@ if ($gen2ok) {
     T '        5   = 杀软主动拦 → 把 C:\Windows\System32\drivers\inpoutx64.sys、inpoutx64.dll，' 'Yellow'
     T '              以及 C:\ProgramData\CMP40HXGen2、C:\ProgramData\40HXUnlock 两个目录加进杀软信任区；' 'Yellow'
     T '        183 = 已有同款实例（新版会自动复用；若还报这个，完全关机再开机）；' 'Yellow'
-    T '        2   = 驱动文件被杀软删了 → 用包里的“一键安装.cmd -Mode Repair”补文件。' 'Yellow'
+    T '        2   = 驱动文件被杀软删了 → 用包里的“一键解锁40HX.bat”选 `3`（Repair）补文件。' 'Yellow'
     T '   2) 完全关机再开机（不是重启），再双击本文件跑一次；' 'Yellow'
     T '   3) 还不行：把 40HX-Gen2修复结果-*.txt + 桌面 retrain-last.log 一起发回（末尾“驱动加载失败现场”里有事件日志/杀软/文件哈希）。' 'Yellow'
   }

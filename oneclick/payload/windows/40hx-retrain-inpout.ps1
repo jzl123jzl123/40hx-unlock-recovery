@@ -10,7 +10,10 @@
 #             it waited the full 120s and exited 12 on every boot. -GpuBdf/-RootBdf override (hex like 0x0200).
 $ErrorActionPreference='Continue'
 # 工具版本号：必须在使用点之前定义（2026-10-01 修正：原先定义在文件后半段，banner 里的 ver= 一直是空的）
-$TOOL_VER = '20261012a'
+$TOOL_VER = '20261014a'
+# 2026-10-14：并入客户 Gen2 包 c 版（20261013c）的 Stage2 块（Link Disable 循环，锁态卡专用）+ PASS/FAIL
+#   判定改用最终实测 LNKSTA；上面这行版本号同时 bump 到 20261014a —— 已装过旧包的机器要跑一次
+#   一键修复Gen2.cmd 才会同步 C:\ProgramData\CMP40HXGen2\windows\ 那份副本（版本门禁，见 2026-10-13 DSH r4 必修 Q5）。
 # 2026-10-02（用户要求：解锁状态正常了就别再堆日志）：完整读数写 retrain-last.log —— **每次运行覆盖**，
 #   不再像老版那样每开机往 retrain-inpout.log 追加一份（那个文件只增不减，一个月长到 200+ KB）。
 #   要留档请在覆盖前拷走；开机任务会把失败那次的全量日志另存到 logs\failures\。
@@ -769,24 +772,47 @@ $GUARD_OFF=0x0;   $GUARD_EXP=U32 '166000A1'
 #   LINK_CONFIG_0 : Gen2 位 = bit18(0x00040000)，Gen2 态为 **0**   （0x800C5800 -> 0x80085800）
 #   PRIV_MISC_1   : Gen2 位 = bit13(0x00002000)，Gen2 态为 **1**   （0xE0B40D00 -> 0xE0B42D00）
 #   PRIV_MISC_1 的 bit11(0x800) 是 VBIOS 批次跳线位（.04=0xD00 / .06=0x500）—— 必须原样保留，只动 bit13。
-$LC0_OFF=0x8C040; $LC0_BASE=U32 '80085800'
+$LC0_OFF=0x8C040; $LC0_BASE=U32 '80005800'
 # 2026-10-05 (客户机 Colorful C.H81-DS PRO + VBIOS .06)：
 #   实测该平台/批次读出的 LINK_CONFIG_0 = 0x805C5800（比 0x800C5800 多 bit20/bit22），
 #   旧掩码 FFFBFFFF（只忽略 bit18）直接判"族外"→ exit 11 拒写（假失败）。
 #   现改为：忽略 Gen2 位(bit18) + 实测见过的批次跳线位(bit20/bit22) → 掩码 FFABFFFF，
 #   目标值仍然是厂商 EFI 写入的已知良好值 0x80085800（写回时把那两个位置归一化），
 #   其它任何位不符仍然拒写。写之前会把原值落盘（可回滚）。
-$LC0_BASE_MASK=U32 'FFABFFFF'
+# 2026-10-13（新客户机 DUKUCE = 清华同方 Z8000 + B360-N，VBIOS 90.06.67.00.04）：
+#   该卡读出 LINK_CONFIG_0 = 0x80045800，被旧口径判“族外”→ exit 11 拒写（假失败）。
+#   厂商生产 EFI `.bnative` 反汇编（守卫 `cmp … 0x80045800`、写 0x80085800 后按 `&0xC0000==0x80000`
+#   校验）证实 bits[19:18] 是**同一个 2 位速率字段**，四种取值都是合法观测：
+#     00 = 0x80005800（我们自己的解锁固件 EFI-B 预埋写的）/ 01 = 0x80045800（POST 原始态 = 厂商守卫期望）
+#     / 10 = 0x80085800（厂商 Gen2 目标写入）/ 11 = 0x800C5800（驱动起来后的运行态）
+#   旧掩码 FFABFFFF 只忽略 bit18 → 连字段 01/00 都算族外（0x80005800 那台还是我们自己固件留下的状态）。
+#   现掩码改为 FFA3FFFF（bit19+bit18 整段忽略），写目标另按厂商字面归一化成字段 10。
+$LC0_BASE_MASK=U32 'FFA3FFFF'
 # 2026-10-11（热补，客户机 技嘉 Z790M AORUS ELITE + VBIOS 90.06.67.00.06）：
 #   该批次实测 PRIV_MISC_1 = 0xE0B46500（族基准之外多 bit13(本就是 Gen2 位) + bit14），
 #   bit14 判定为又一批次的跳线位 → 掩码再忽略 bit14（FFFFD7FF -> FFFF97FF）。
 #   写回逻辑不变：只置 bit13；bit14 与 bit11 一样**原样保留**；其它位不符仍然拒写。
-$PM1_OFF=0x8841C; $PM1_BASE_MASK=U32 'FFFF97FF'; $PM1_BASE=U32 'E0B40500'   # mask 清掉 bit13(Gen2 位)、bit11 与 bit14(批次跳线位) 后再比
+# 2026-10-13（同上）：PRIV_MISC_1 有第二个族前缀 —— 厂商 .bnative 原始态 = 0x20342500（掩码后 0x20340500），
+#   与我们从本机拟合的 0xE0B4xxxx 族并存（客户机实测值与厂商守卫常量逐字相等，
+#   且这一族正是我们自己固件 EFI-B 阶段 prime 写下的值）。
+#   掩码同时忽略整个 4 位字段 bits[14:11]（厂商目标 0x2800）；写回逻辑不变（只置 bit13，其余位原样保留）。
+#   注意：下面那行行尾的旧注释只提到 bit11/bit14，实际掩码已扩到整个 4 位字段。
+$PM1_OFF=0x8841C; $PM1_BASE_MASK=U32 'FFFF87FF'; $PM1_BASE=U32 'E0B40500'; $PM1_BASE2=U32 '20340500'   # mask 清掉 bit13(Gen2 位)、bit11 与 bit14(批次跳线位) 后再比
+# 2026-10-13：族判定抽成两个助手函数（原来是一行内联掩码比较，控制流不变）。
+#   LC0：掩码已整段忽略速率字段 bits[19:18]（四值皆合法），故只按掩码比族。
+function Test-Lc0Family([uint32]$v){
+  return ((($v -band $LC0_BASE_MASK)) -eq $LC0_BASE)
+}
+#   PM1：两族白名单（本机拟合族 0xE0B4xxxx + 厂商 .bnative 原始族 0x2034xxxx），比无脑放宽掩码更严。
+function Test-Pm1Family([uint32]$v){
+  $m = ($v -band $PM1_BASE_MASK)
+  return (($m -eq $PM1_BASE) -or ($m -eq $PM1_BASE2))
+}
 function DecideTargets([uint32]$l,[uint32]$p){
   $r=@{ Ok=$false; Lc0=$l; Pm1=$p; Lc0Change=$false; Pm1Change=$false; Reason='' }
-  if((($l -band $LC0_BASE_MASK)) -ne $LC0_BASE){ $r.Reason = 'LINK_CONFIG_0 baseline not in known family: 0x' + $l.ToString('X8'); return $r }
-  if((($p -band $PM1_BASE_MASK)) -ne $PM1_BASE){ $r.Reason = 'PRIV_MISC_1 baseline not in known family: 0x' + $p.ToString('X8'); return $r }
-  $r.Lc0 = ($l -band $LC0_BASE_MASK)     # 清 bit18
+  if(-not (Test-Lc0Family $l)){ $r.Reason = 'LINK_CONFIG_0 baseline not in known family: 0x' + $l.ToString('X8'); return $r }
+  if(-not (Test-Pm1Family $p)){ $r.Reason = 'PRIV_MISC_1 baseline not in known family: 0x' + $p.ToString('X8'); return $r }
+  $r.Lc0 = (($l -band $LC0_BASE_MASK) -bor (U32 '80000'))     # 清 bit18
   $r.Pm1 = ($p -bor ([uint32]0x2000))    # 置 bit13（Gen2 位）
   $r.Lc0Change = ($r.Lc0 -ne $l); $r.Pm1Change = ($r.Pm1 -ne $p); $r.Ok = $true
   return $r
@@ -815,8 +841,8 @@ $lc0=MmioRead ([uint64]($bar+$LC0_OFF))
 $pm1=MmioRead ([uint64]($bar+$PM1_OFF))
 $ss0=MmioRead ([uint64]($bar+0x409664))
 W("  BOOT0         = " + $(if($boot0 -eq $null){'READ FAILED'}else{'0x'+$boot0.ToString('X8')}))
-W("  LINK_CONFIG_0 = " + $(if($lc0 -eq $null){'READ FAILED'}else{'0x'+$lc0.ToString('X8')}) + "   (Gen2位=bit18: 1=Gen1态/0=Gen2态; 族基准 0x80085800; bit20/bit22=批次跳线位,写回时归一化)")
-W("  PRIV_MISC_1   = " + $(if($pm1 -eq $null){'READ FAILED'}else{'0x'+$pm1.ToString('X8')}) + "   (Gen2位=bit13: 1=Gen2态; bit11/bit14=批次跳线位,原样保留; 族基准 0xE0B40500)")
+W("  LINK_CONFIG_0 = " + $(if($lc0 -eq $null){'READ FAILED'}else{'0x'+$lc0.ToString('X8')}) + "   (Gen2位=bit18: 1=Gen1态/0=Gen2态; 速率字段=bits[19:18], 写入统一归一化为 10=0x80085800; bit20/bit22=批次跳线位)")
+W("  PRIV_MISC_1   = " + $(if($pm1 -eq $null){'READ FAILED'}else{'0x'+$pm1.ToString('X8')}) + "   (Gen2位=bit13: 1=Gen2态; 掩码忽略整段字段 bits[14:11]; 已知两族 0xE0B4xxxx / 0x2034xxxx(掩码后 0xE0B40500 / 0x20340500))")
 W("  SS0           = " + $(if($ss0 -eq $null){'READ FAILED'}else{'0x'+$ss0.ToString('X8')}) + "   (0x88888888 = compute unlocked)")
 
 # ---- 2026-10-12: fuse 窗口只读快照（-DumpFuse；给"Prod 卡 fuse 烧没烧死"攒样本）----
@@ -1096,6 +1122,125 @@ if(-not $reach){
   }
   W("  (GPU-side retrain attempts done; reach=$reach)")
 }
+# ===== 2026-10-13 追加（客户试用包 v2）：Stage2 = Link Disable 循环 =====
+# 为什么需要它：只写 LNKCTL bit5(Retrain，自清位) 时，锁态卡（GPU LNKCAP 只声明 2.5GT/s）训不上 Gen2；
+#   厂商 40HXInstaller.exe -gen2 -hard 的 Stage2 靠 LNKCTL bit4(Link Disable) 置位→清零（清除即触发重训）
+#   把卡的能力位翻过来，之后才谈得上 Gen2。本块用同一机制，但走 inpoutx64/WinRing0，全程不动反作弊。
+# 安全门（v2 起按 DSH r1 Q2 收紧：只有在**确认** SS0 是锁定态时才做 Link Disable）：
+#   · SS0 读取失败（状态未知）        → **跳过**（v1 会当成锁定态执行，已改）；
+#   · SS0=0x88888888（算力已解锁）    → **跳过**（厂商 README 记录过该路径清掉算力解锁），HX_STAGE2_FORCE=1 可强制；
+#   · SS0≠0x88888888（锁定态，本包目标场景）→ 执行；
+#   · HX_NO_STAGE2=1 整体关；HX_STAGE2_ALWAYS=1 = 测试钩子（即使本次已到 Gen2 也走一遍，用于验证本块）。
+# 本块只用局部变量 $st2ok 记录自己的结果，最后才回写 $reach（v2 起修：v1 直接读 $reach 会让重训循环被短路）。
+if($env:HX_NO_STAGE2 -ne '1'){
+  $ss0h = $(if($ss0 -eq $null){''}else{$ss0.ToString('X8')})
+  $st2Force = ($env:HX_STAGE2_FORCE -eq '1')
+  $st2Pnp = ($env:HX_STAGE2_PNP -ne '0')
+  $st2Run = ((-not $reach) -or ($env:HX_STAGE2_ALWAYS -eq '1'))
+  W("  --- Stage2 判定: SS0=0x" + $ss0h + "  本次reach=$reach  force=$st2Force  pnp=$st2Pnp ---")
+  if(-not $st2Run){
+    W("  --- Stage2 SKIPPED：本次已经到 Gen2（要强制走一遍做验证：HX_STAGE2_ALWAYS=1）---")
+  } elseif($ss0h -eq ''){
+    W("  --- Stage2 SKIPPED：SS0 读取失败（状态未知）→ 保守起见不做 Link Disable；请重跑一次，仍失败就把日志发回 ---")
+  } elseif(($ss0h -eq '88888888') -and (-not $st2Force)){
+    W("  --- Stage2 SKIPPED：算力已解锁(SS0=0x88888888) → 保守起见不做 Link Disable（该路径可能清掉算力解锁）。")
+    W("      如确需强制：设环境变量 HX_STAGE2_FORCE=1 再跑本工具。 ---")
+  } else {
+    $st2ok=$false
+    $ctl=PciRead $ROOT ([uint32]($rcap+0x10)) 2
+    if($ctl -eq $null){ W("  Stage2 SKIPPED: ROOT LNKCTL 读取失败") }
+    else{
+      $old=[uint16]($ctl -band 0xFFFF)
+      $dis=[uint16]($old -bor 0x0010)
+      $ok1=PciWrite16 $ROOT ([uint32]($rcap+0x10)) $dis
+      W("  Stage2 ROOT Link Disable 置位: 0x" + $old.ToString('X4') + " -> 0x" + $dis.ToString('X4') + " writeOk=$ok1")
+      try { ('Stage2 ROOT LNKCTL original=0x' + $old.ToString('X4') + ' (LinkDisable req=0x' + $dis.ToString('X4') + ')') | Out-File -FilePath $rwPath -Encoding utf8 -Append } catch { }
+      Start-Sleep -Milliseconds 1000
+      $rb1=PciRead $ROOT ([uint32]($rcap+0x10)) 2
+      W("  Stage2 Link Disable 在位回读=0x" + $(if($rb1 -eq $null){'READ FAILED'}else{([uint16]($rb1 -band 0xFFFF)).ToString('X4')}))
+      $ok2=PciWrite16 $ROOT ([uint32]($rcap+0x10)) $old
+      W("  Stage2 清 Link Disable(=触发重训): -> 0x" + $old.ToString('X4') + " writeOk=$ok2")
+      for($i=1; $i -le 15; $i++){
+        Start-Sleep -Milliseconds 300
+        $r=LinkSta $rcap $ROOT
+        if($i -le 4){ W("    LT poll $i ROOT_GEN=" + ($r -band 0xF) + " LNKSTA=0x" + $r.ToString('X4')) }
+        if(($r -band 0xF) -ge 1){ break }
+      }
+      foreach($side in @(,@('GPU',$GPU,$gcap)) + @(,@('ROOT',$ROOT,$rcap))){
+        $nm=[string]$side[0]; $bdf=[uint32]$side[1]; $cap=[uint32]$side[2]
+        $v=PciRead $bdf ([uint32]($cap+0x30)) 2
+        if($v -eq $null){ W("  Stage2 $nm LNKCTL2 读取失败，跳过") ; continue }
+        $lo=[uint16]($v -band 0xFFFF); $nw=[uint16](($lo -band 0xFFF0) -bor 0x0002)
+        $okw=PciWrite16 $bdf ([uint32]($cap+0x30)) $nw
+        $rb=PciRead $bdf ([uint32]($cap+0x30)) 2
+        W("  Stage2 $nm LNKCTL2 TLS=2: 0x" + $lo.ToString('X4') + " -> 0x" + $nw.ToString('X4') + " writeOk=$okw 回读TLS=" + $(if($rb -eq $null){'READ FAILED'}else{[string]([uint16]($rb -band 0x000F))}))
+      }
+      for($att=1; $att -le 3 -and (-not $st2ok); $att++){
+        $c2=PciRead $ROOT ([uint32]($rcap+0x10)) 2
+        if($c2 -ne $null){
+          $o2=[uint16]($c2 -band 0xFFFF); $rq=[uint16]($o2 -bor 0x0020)
+          $okr=PciWrite16 $ROOT ([uint32]($rcap+0x10)) $rq
+          W("  Stage2 ROOT retrain #" + $att + ": old=0x" + $o2.ToString('X4') + " -> 0x" + $rq.ToString('X4') + " writeOk=$okr")
+        }
+        for($i=1; $i -le 25; $i++){
+          Start-Sleep -Milliseconds 200
+          $g=LinkSta $gcap $GPU; $r=LinkSta $rcap $ROOT
+          if($i -le 3 -or (($r -band 0xF) -eq 2 -and ($g -band 0xF) -eq 2)){ W("    poll $i ROOT_GEN=" + ($r -band 0xF) + " GPU_GEN=" + ($g -band 0xF) + " LNKSTA=0x" + $r.ToString('X4')) }
+          if(($r -band 0xF) -eq 2 -and ($g -band 0xF) -eq 2){ $st2ok=$true; W("    Stage2 retrain #" + $att + ": 已训上 Gen2"); break }
+        }
+      }
+      W("  Stage2 结果(Link Disable 后): st2ok=$st2ok")
+      if($st2Pnp){
+        W("  Stage2 PnP 重载（恢复驱动；链路会再瞬断一次）...")
+        $dev=@(Get-PnpDevice -Class Display -ErrorAction SilentlyContinue | Where-Object { $_.InstanceId -match 'DEV_1F0B' }) | Select-Object -First 1
+        if($dev){
+          try { Disable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction Stop; Start-Sleep -Seconds 5; Enable-PnpDevice -InstanceId $dev.InstanceId -Confirm:$false -ErrorAction Stop; W("    PnP 重载已下发") } catch { W("    PnP 重载失败: " + $_.Exception.Message) }
+          for($i=1; $i -le 20; $i++){
+            Start-Sleep -Seconds 3
+            $d2=Get-PnpDevice -InstanceId $dev.InstanceId -ErrorAction SilentlyContinue
+            if($d2 -and $d2.Status -eq 'OK'){ W("    PnP 后设备=" + $d2.Status + " / " + $d2.Problem + " (t+" + ($i*3) + "s)"); break }
+          }
+        } else { W("    找不到 DEV_1F0B 设备") }
+        # PnP 重载会把策略/目标寄存器重置 → 必须照主流程补写 + 双轮重训，否则会掉回 Gen1
+        $st2ok=$false
+        Start-Sleep -Seconds 5
+        for($att2=1; $att2 -le 3 -and (-not $st2ok); $att2++){
+          $g=LinkSta $gcap $GPU; $r=LinkSta $rcap $ROOT
+          if(($r -band 0xF) -eq 2 -and ($g -band 0xF) -eq 2){ $st2ok=$true; break }
+          W("    PnP 后链路 = ROOT 0x" + $r.ToString('X4') + " / GPU 0x" + $g.ToString('X4') + " → 第 " + $att2 + " 轮补写+重训")
+          $null=MmioWrite ([uint64]($bar+$LC0_OFF)) $dec.Lc0
+          $null=MmioWrite ([uint64]($bar+$PM1_OFF)) $dec.Pm1
+          foreach($side in @(,@('GPU',$GPU,$gcap)) + @(,@('ROOT',$ROOT,$rcap))){
+            $nm=[string]$side[0]; $bdf=[uint32]$side[1]; $cap=[uint32]$side[2]
+            $v2=PciRead $bdf ([uint32]($cap+0x30)) 2
+            if($v2 -ne $null){
+              $lo2=[uint16]($v2 -band 0xFFFF); $nw2=[uint16](($lo2 -band 0xFFF0) -bor 0x0002)
+              $null=PciWrite16 $bdf ([uint32]($cap+0x30)) $nw2
+            }
+          }
+          for($k=1; $k -le 2 -and (-not $st2ok); $k++){
+            $c3=PciRead $ROOT ([uint32]($rcap+0x10)) 2
+            if($c3 -ne $null){
+              $o3=[uint16]($c3 -band 0xFFFF); $rq3=[uint16]($o3 -bor 0x0020)
+              $null=PciWrite16 $ROOT ([uint32]($rcap+0x10)) $rq3
+              W("      补写后 ROOT retrain #" + $k + " (old=0x" + $o3.ToString('X4') + ")")
+            }
+            for($i=1; $i -le 25; $i++){
+              Start-Sleep -Milliseconds 200
+              $g=LinkSta $gcap $GPU; $r=LinkSta $rcap $ROOT
+              if($i -le 3){ W("        poll $i ROOT_GEN=" + ($r -band 0xF) + " LNKSTA=0x" + $r.ToString('X4')) }
+              if(($r -band 0xF) -eq 2 -and ($g -band 0xF) -eq 2){ $st2ok=$true; W("      PnP 后补训成功(Gen2)"); break }
+            }
+          }
+        }
+        $g=LinkSta $gcap $GPU; $r=LinkSta $rcap $ROOT
+        W("    PnP 后终态: ROOT LNKSTA=0x" + $r.ToString('X4') + " GPU LNKSTA=0x" + $g.ToString('X4') + " st2ok=$st2ok")
+      }
+      $reach=$st2ok
+    }
+  }
+}
+
 # 2026-09-30 新增：重训后复读策略寄存器 —— 区分“写了没用（缺 EFI 预埋）"和"写了但被驱动/GSP 立刻冲掉"
 $lc0b=MmioRead ([uint64]($bar+$LC0_OFF)); $pm1b=MmioRead ([uint64]($bar+$PM1_OFF))
 W("  post  : LINK_CONFIG_0 现在 = " + $(if($lc0b -eq $null){'READ FAILED'}else{'0x'+$lc0b.ToString('X8')}) + "   PRIV_MISC_1 现在 = " + $(if($pm1b -eq $null){'READ FAILED'}else{'0x'+$pm1b.ToString('X8')}))
@@ -1112,7 +1257,11 @@ CleanupDrivers
 W("  after cleanup: " + $script:ioSvc + "=" + (Flat1 ((sc.exe query $script:ioSvc 2>&1) | Out-String)) + "   设备可打开=" + (DevOpenInpout) + "  本次由本工具创建=" + $script:ioCreated)
 W("  ACE-BOOT=" + ((sc.exe query ACE-BOOT | Select-String 'STATE' | Out-String).Trim()) + "   ACE-Tray PIDs " + ((@(Get-Process ACE-Tray -ErrorAction SilentlyContinue)|ForEach-Object{$_.Id}) -join ','))
 W("  GPU PnP=" + ((Get-CimInstance Win32_PnPEntity -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'CMP 40HX' } | Select-Object -First 1).Status))
-if($reach){ W("  >>> PASS: physical Gen2 x16 reached, the anti-cheat was never stopped"); W("==== end $(Get-Date -Format 'HH:mm:ss') ===="); exit 0 }
-W("  >>> FAIL: did not reach Gen2 x16")
+# 2026-10-13：判定改用**最终实测**的 LNKSTA（$gf/$rf = 上面那次复读），不再只看中途的 $reach（DSH r1 Q3）
+$gen2final = ((($gf -band 0xF) -eq 2) -and (($rf -band 0xF) -eq 2))
+$gfh = $(if($gf -eq $null){'READ FAILED'}else{$gf.ToString('X4')})
+$rfh = $(if($rf -eq $null){'READ FAILED'}else{$rf.ToString('X4')})
+if($gen2final){ W("  >>> PASS: physical Gen2 x16 reached (final LNKSTA GPU=0x" + $gfh + " ROOT=0x" + $rfh + "), the anti-cheat was never stopped"); W("==== end $(Get-Date -Format 'HH:mm:ss') ===="); exit 0 }
+W("  >>> FAIL: did not reach Gen2 x16 (final LNKSTA GPU=0x" + $gfh + " ROOT=0x" + $rfh + ")")
 W("==== end $(Get-Date -Format 'HH:mm:ss') ====")
 exit 10

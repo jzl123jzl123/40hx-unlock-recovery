@@ -6,7 +6,7 @@ setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 title CMP 40HX 一键卸载
 
-rem ---- preflight（与 一键安装.cmd 同款：单行+末尾标签，避免文件夹名带 ) 或 & 时括号块解析炸掉）
+rem ---- preflight（与 一键解锁40HX.bat 同款：单行+末尾标签，避免文件夹名带 ) 或 & 时括号块解析炸掉）
 if not exist "%~dp0Install-40HXUnlock.ps1" goto nops1
 
 rem 已提权的那一份（带 elevated 标记）直接干活，不再问第二次
@@ -55,7 +55,7 @@ echo   不会自动还原（都不影响使用）：GSP 开关 / 快速启动 / 策略键等，
 echo   卸载时脚本会列出完整清单。
 echo.
 echo   卸载后【重启】一次就回到原生（未解锁）状态。
-echo   想装回来：双击 一键安装.cmd 即可。
+echo   想装回来：双击 一键解锁40HX.bat 即可。
 echo.
 set /p ANS=确定要卸载吗？回车开始卸载，输入 n 退出: 
 if /i "%ANS%"=="n" goto quit
