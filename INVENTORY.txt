@@ -58,7 +58,7 @@ d568a02c942871d4a1c2e24d0b065f71     92927  oneclick/payload/windows/40hx-retrai
 dd38d4d86ea1326e8c01266c4de2ab6c     19984  oneclick/payload/windows/ACE-Toggle.ps1
 544dc24781fb08de94ea685c7e38ee25     26044  oneclick/payload/windows/RunPostBind.cmd
 8dc1be522a6c4b1c644050895508f065      6581  oneclick/payload/windows/Unpack-Drivers.ps1
-81c0f54986da2196232e472ea5bcb0b3     26998  oneclick/README.md
+741db585880ae3af8932e3e1027ed524     31081  oneclick/README.md
 0a7ddb2da67b403da758f10ed1f7c8bb     10802  oneclick/THIRD_PARTY.md
 e930dd8a8130ef830c25a0240d403b37      1908  oneclick/一键修复Gen2.cmd
 36d4f412897f41553aedbb04968ce2f8     25922  oneclick/一键修复Gen2.ps1
@@ -116,8 +116,8 @@ bd68fd7e0798cca7bf8c07d14bb22081       312  oneclick/归档-旧版本/hotfix-202
 2d4de87d0c33cecb05879875230ad59e       418  oneclick/归档-旧版本/就地更新并跑一次.cmd
 56ba5437d011d1fe85462509eda34085      4117  oneclick/归档-旧版本/就地更新并跑一次.ps1
 909d8d0175c2e2508dc7522f965576a8      3617  oneclick/归档-旧版本/给客户-操作指引-20260930d.txt
-eeb91292c867e8b450facdea9d8f2ee9     95660  oneclick/排查指引.md
-cd0ff902768e8482908f4566922ac697     39359  oneclick/文档/使用说明-详细.md
+211f6d58bbf40987a0931507a06e835e     96865  oneclick/排查指引.md
+d4f00a96e8616c3606f475d0be9f029b     41393  oneclick/文档/使用说明-详细.md
 1850026059651ff54df6edba269b903f      5189  oneclick/文档/给客户-ACE报错处理指引-20261004.txt
 af386259468e1eec4c5bfd0da6ef84db      9079  oneclick/文档/给客户-Gen2预埋缺失-怎么办-20261005.txt
 27a49e780858718e95e47ce90fd51263      3634  oneclick/文档/给客户-安装退出码196608-怎么办.txt
@@ -187,7 +187,7 @@ c7c28a0972d3bc2e024e4a766d16f516      3533  payload/windows-live/RunPostBind.cmd
 71458e1cbf9d86c288c1a1faa714e0bd      2776  payload/windows-live/RunPostBind.no-ace.cmd.bak
 6e3f7dbd75d2e59fd824c195b7278477       735  payload/windows-live/Status.cmd
 2a44b95ea3797a1dcffe4cf5fe4fb08f      1017  payload/windows-live/Uninstall_Auto.cmd
-81c0f54986da2196232e472ea5bcb0b3     26998  README.md
+741db585880ae3af8932e3e1027ed524     31081  README.md
 d094d3d8f42685ee61bddc9b9aa33474     31563  scripts/40HX解锁状态.bat
 a263240ac52b02cb91cf692e965be17c       996  scripts/clean-run-keys.ps1
 9070c6fe409e3005a14cc02aa9f97c67      4611  scripts/coldboot-report.ps1

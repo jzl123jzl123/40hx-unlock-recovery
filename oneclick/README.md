@@ -7,6 +7,18 @@
 
 ---
 
+## ⬇ 下载（点这一条就够，不用点 Code、不用看懂 GitHub）
+
+| 你要什么 | 怎么拿 |
+|---|---|
+| **一键包（推荐；装机器只用它）** | [点此直接下载 `40hx-oneclick.zip`](https://github.com/nie2100/40hx-unlock-recovery/releases/latest/download/40hx-oneclick.zip)（约 0.9 MB）→ 解压 → 双击 **`一键解锁40HX.bat`**（★主入口，带菜单：`1` 算力+Gen2 / `2` 再加 ReBAR 8 GiB / `3` 只解 Gen2 / `f` 强行解锁 / `r` 只体检 / `u` 撤销 ReBAR / `x` 先去 BIOS 改设置项；老入口 `一键安装.cmd` 已并进这一个） |
+| 整个仓库（原理文档 + 实测证据 + 源码） | （在 GitHub 首页看这份说明时）绿色 **`Code`** 按钮 → **`Download ZIP`**。这是**整个仓库**，装机器时只用里面 **`oneclick/`** 那一层目录 |
+| 国内下载慢 / 超时 / 打不开 | 在链接前面加镜像前缀 `https://ghfast.top/`，例：`https://ghfast.top/https://github.com/nie2100/40hx-unlock-recovery/releases/latest/download/40hx-oneclick.zip` |
+
+> 一键包的 **sha256 写在对应 Release 的说明里**（[所有版本](https://github.com/nie2100/40hx-unlock-recovery/releases)），下载后可自行核对。
+
+---
+
 ## 这是什么
 
 CMP 40HX 是矿卡：出厂被人为压了算力（寄存器 SS0 锁住），PCIe 链路压到 Gen1，BAR1 也被压成 64 MiB。
@@ -40,14 +52,21 @@ CMP 40HX 是矿卡：出厂被人为压了算力（寄存器 SS0 锁住），PCI
 |---|---|---|---|
 | **1 · 必须（硬门槛）** | **Secure Boot**（安全启动） | **Disabled**（老华硕选 `Other OS`） | 解锁固件未签名，开着就不执行 → 算力一直没解锁 |
 | **2 · 装后必验证** | 启动顺序：**`40HX Unlock` 排第一** | 装完第一次开机必须看到 40HX 跑码界面 | 脚本写进 NVRAM 的启动顺序 ≠ BIOS 真选了它（客户机实证）—— 没跑码界面 = 固件没被执行，进 BIOS 把它排第一 |
-| **3 · 失败排查首查** | **Above 4G Decoding**（4G 以上解码） | 建议 **Enabled**（主板没这个选项可跳过） | 多数单卡主机不开也能正常解锁（实测）；多卡/板载设备多的机器关着 → 认不到卡 / 代码 43 / 黑屏 |
-| **4 · 强烈建议** | **CSM**（Launch CSM / CSM Support） | **Disabled** | 开着、但系统确实是 UEFI+GPT 引导的也能正常解锁；它的害处是容易把系统装成 Legacy/MBR（那种会被判定"固件不是 UEFI 模式"直接中止）；且开着 CSM 通常也开不了 Above 4G |
+| **3 · 失败排查首查** | **Above 4G Decoding**（4G 以上解码；**铭瑄板上叫 `Above 4GB MMIO BIOS assignment`**） | **建议 Enabled**（主板没这个选项可跳过） | **我们核过的技嘉板该项（`Above 4G Decoding`）IFR 默认就是 `Disabled`，得手动开**；铭瑄板上对应的 `Above 4GB MMIO BIOS assignment` 在 BIOS 里**没有写默认值、我们的工具读不到 ⇒ 现场请直接进 BIOS 读它的当前值**（我们自己的开发机也是手动打开的）。它管的是“平台肯不肯让设备用 4GB 以上的地址”—— 解锁固件要在**主机内存 4GB 以上**放载荷、让显卡 DMA 读回来，读不回来就卡在 `WPR2 NOT UP` / `IMEM[0]=0xffffffff`（固件层），下游表现就是每次开机代码 43。也有单卡主机不开也能解（实测），所以不是“绝对必须”，但**只需进一次 BIOS、不影响系统，就能排除“地址解码”这一层**，排查时排第一。 |
+| **4 · 强烈建议** | **CSM**（Launch CSM / CSM Support） | **Disabled** | **和第 3 项是耦合的**：铭瑄 BIOS 里核显 `Aperture Size` 的帮助文本原文写着“选 2048MB 时才**自动**打开 Above 4GB MMIO 分配，且**必须先关掉 CSM Support**” ⇒ 在这类板上 CSM 开着，above-4GB MMIO 就不会被自动打开（那条原文的适用条件是核显 `Aperture Size` 选 2048MB）。另外 CSM 开着容易把系统装成 Legacy/MBR（会被判“固件不是 UEFI 模式”直接中止）。开着 CSM 但系统确实是 UEFI+GPT 的也能解（实测），所以也不叫绝对必须，但**想开第 3 项就得先关它**。 |
 | **5 · 建议** | **Fast Boot**（快速启动） | 建议 **Disabled** | 部分固件（Ultra Fast 类）会跳过启动顺序直进 Windows → 解锁固件那次开机没被执行；排查"没出现跑码界面"时必查。（Windows 的"快速启动"是另一回事：它让"关机"变混合关机、GSP 改动不生效，Install 会自动关掉它） |
 | **6 · 只影响 Gen2** | 该 x16 槽的 **PCIe 速率** | **Auto**（别锁 Gen1） | 锁 Gen1 就永远上不了 Gen2 x16；设 Gen3/Gen4 也行（自动协商到 Gen2）。只影响 Gen2，不影响算力解锁——纯算力可不管这项 |
 
 位置（各家叫法不同，按关键词找）：华硕 `Advanced → System Agent (SA) Configuration`、技嘉 `Settings → IO Ports`、
 微星 `Settings → Advanced → PCI Subsystem Settings`、华擎 `Advanced → Chipset Configuration`；
 CSM / Secure Boot / Fast Boot 都在 `Boot` / `Security` 页。逐条报错对照见 `排查指引.md` 第 3 节。
+
+**第 3、4 项到底“必须”吗？（2026-10-15 更新）**
+
+- `Above 4G Decoding`：**不是绝对必须，但建议开**。我们核过的技嘉板该项默认是 **Disabled**（要手动开）；铭瑄平台上对应项的默认值我们的工具读不到（IFR 里没写）⇒ **现场进 BIOS 读它的实值**。它管的是“设备能不能用 4GB 以上地址”，而我们的解锁固件正是在 4GB 以上放载荷。
+- `CSM`：**建议关**，且和第 3 项是**耦合**关系（见上表：不关 CSM，above-4GB MMIO 基本开不了）。
+- 这两项都设好还是解不开？**下一步是升级主板 BIOS**：2026-10-15 实证 —— 铭瑄 MS-TZZ H610ITX 2.5G 从 `E1.2G(2022-05)` 升到 `E2.4G(2025-07)` 后，同一张卡 `WPR2 UP after 0ms → booter OK (attempt 1) → 解锁成功`；E1.2G 上同一处死活是 `WPR2 NOT up`。⚠ 这是**实测现象**（“升级后同一张卡就通了”），**因果未定案** —— 静态对比只能证明那一版换了哪些组件，证明不了具体是哪一处修好的。升级会顺带把 BIOS 设置重置成默认，所以升级后请把上面 6 项再核一遍。
+- 还想更彻底（**可选、尚未定案**）：把 `Control Iommu Pre-boot Behavior` 设成 `Disable IOMMU`。能解锁的技嘉板默认就是关；失败侧铭瑄板默认是开，而解锁固件跑的正是开机（pre-boot）阶段。**纯实验项、可能无效**：客户那台铭瑄板在 E2.4G（仍默认开 IOMMU）下也解锁成功了，说明这项的默认值差异不足以解释全部现象。先设上面第 3、4 项，这一项作为“还不行时再试”。
 
 想先只看不改：双击 `一键解锁40HX.bat` 选 `r`（只体检，什么都不改），或 `Install-40HXUnlock.ps1 -Mode Check`（纯体检，0 项失败即环境 OK）。
 
@@ -65,7 +84,7 @@ CSM / Secure Boot / Fast Boot 都在 `Boot` / `Security` 页。逐条报错对�
 
 同样两张 `90.06.67.00.06` 卡（VBIOS 内容几乎相同）：装在 **精粤 B660I** 上**两张都成功**（算力 + Gen2）；
 换到 **铭瑄 H610ITX** 上**两张都失败**（固件起不来、PLM 关窗、每次开机代码 43）。
-⇒ **同卡换板、结局翻转；换卡不换板、结局不变**：能不能解多半在**平台（主板 / BIOS 三项 / BIOS 太老 / 64 位地址解码）**，
+⇒ **同卡换板、结局翻转；换卡不换板、结局不变**：能不能解多半在**平台（主板 / BIOS 设置项 / BIOS 太老 / 64 位地址解码）**，
 不在卡、也不在版本号。所以本包**不再按 VBIOS 版本给结论**，安装器只把版本号念一遍当记录。
 
 那什么情况下真解不了？
@@ -73,7 +92,7 @@ CSM / Secure Boot / Fast Boot 都在 `Boot` / `Security` 页。逐条报错对�
 | 情况 | 说明 | 怎么办 |
 |---|---|---|
 | **锁死批次**（POST 寄存器形态 `SS0=0x20000010`） | 算力 + Gen2 都解不了（写入回读硬锁，补写工具放行也写不进） | 安装前只读预检会认出来并问你要不要装；不装就退出（退出码 6，零改动） |
-| **平台不配合**（解锁固件在开机阶段起不来） | 症状 = 每次开机代码 43；`40hx_log.txt` 里有 `PLM closed — no booter effect` / `abort:` | 见 `排查指引.md` §5.1c：先 `一键卸载.cmd` + **完全关机**清 43 → BIOS 三项 + **升级主板 BIOS** → 重装；**别急着判卡死刑**（同卡换板就成功过） |
+| **平台不配合**（解锁固件在开机阶段起不来） | 症状 = 每次开机代码 43；`40hx_log.txt` 里有 `PLM closed — no booter effect` / `abort:` | 见 `排查指引.md` §5.1c：先 `一键卸载.cmd` + **完全关机**清 43 → **按上面那张 BIOS 6 项表**把设置项设好 + **升级主板 BIOS** → 重装；**别急着判卡死刑**（同卡换板就成功过） |
 | 其它没见过的形态 | 装完由那次开机自证 | 把 `一键诊断.cmd` 报告发回来攒样本 |
 
 > **代码 43 ≠ 卡坏了**：解锁固件每次开机都会跑一遍，跑失败会留残留态，驱动就认不了卡。
@@ -129,7 +148,7 @@ ReBAR = 让显卡把整块显存一次映射出来（40HX 的 `BAR1` 从 **64 Mi
 
 **必须知道的三条**：
 
-- 主板要 **Above 4G Decoding = Enabled**，并且有一块放得下 8 GiB 对齐空间的空闲 64 位 MMIO 窗口。**BIOS 里的 Re-Size Bar Support 开关在这条路径上不是必需的**。
+- 主板要 **Above 4G Decoding = Enabled**（这是 **ReBAR 这条路径**的前提；**纯算力解锁不要求**一定有这一项），并且有一块放得下 8 GiB 对齐空间的空闲 64 位 MMIO 窗口。**BIOS 里的 Re-Size Bar Support 开关在这条路径上不是必需的**。
 - 不满足时 **EFI 会整体回滚**：系统照常启动，只是 ReBAR 没开（不会黑屏、不会进不去系统），EFI 日志里有原因。
 - 目前只在作者本机（B560M + 1 张 40HX + 驱动 616.92）实测过，其它主板/驱动/多卡未验证 —— 所以建议先 `试跑REBAR.cmd` 试一次，或直接走选项 2，随时能退。
 
