@@ -265,7 +265,9 @@ function Get-BatchVerdict {
   return @{ Verdict=$v; Rc=$rc; Raw=$raw }
 }
 
-# ---- VBIOS 批次判别（2026-10-11 三卡 VBIOS dump 对比实证；无损：只读版本号，不碰硬件）----
+# ---- VBIOS 批次判别（**2026-10-15 起弃用，不再参与判定**；函数保留仅为兼容旧引用/对照）----
+# 弃用理由：2026-10-14 交叉换机实证（案例库 C11）推翻「版本号决定能解性」——同两张 .06 AS03 卡换到精粤 B660I 全解锁、
+#   换到铭瑄 H610ITX 全失败。下面 269~273 行的老口径保留作历史记录，不再作为安装判据。
 # 同型号同 ID（华硕 1043:8804）出厂有两个固件签名链分支：
 #   .04 = NVPartner Debug 链 → EFI 的 FWSEC HS-boot 被接受，算力+Gen2 都可解
 #   .06 = NVPartner Prod  链 → EFI 携带的 blob 被拒签（四条引导路径实测全灭、PLM 关窗）→ 算力无解；
@@ -3007,18 +3009,10 @@ Install-Hardening
 Install-Gsp
 Install-Power
 if ($Mode -eq 'Install') {
-  # 2026-10-11（三卡对比实证）：VBIOS 签名链是算力可否解锁的根因 —— 无损判别（只读 $rep.Vbios），先于寄存器级预检
-  $vbBatch = Get-VbiosBatch -VbiosVersion ([string]$rep.Vbios)
-  if ($vbBatch.Channel -eq 'Debug') {
-    Info ('VBIOS 批次预检：' + $rep.Vbios + ' = Debug 签名链（算力+Gen2 都在可解范围）')
-  } elseif ($vbBatch.Channel -eq 'Prod') {
-    Warn ('VBIOS 批次预检：' + $rep.Vbios + ' = 已知 Prod 签名链变体（同变体已实证 2 例拒签、1 例可解，算力以实测为准；Gen2 视机器可经 Windows 侧落地）')
-    Warn '  注意：.06 存在多个内容变体，个别变体未收录 —— 最终判定以下面寄存器级批次预检为准'
-    Warn '  要算力的唯一出路是刷 Debug 版 VBIOS（高风险操作，需专用刷机包：多源备份 + 一键回滚）—— 找包作者'
-    Add-Action 'VBIOS 是 Prod 批次（算力大概率不可解，以寄存器级预检为准）：要算力先刷 Debug 版 VBIOS；只想要 Gen2 可忽略本条继续装'
-  } else {
-    Warn ('VBIOS 批次预检：' + $(if ($rep.Vbios) { $rep.Vbios } else { '读不到' }) + ' = 未收录版本，可解性以下面寄存器级预检与实测为准')
-  }
+  # 2026-10-15（用户定稿）：**不再按 VBIOS 版本判定能不能解** —— 2026-10-14 交叉换机实证（案例库 C11）：
+  #   同两张 .06 AS03 卡换到精粤 B660I 全解锁、换到铭瑄 H610ITX 全失败；同镜像不同命运。
+  #   版本号只当信息打出来，判定交给下面的寄存器级批次预检（POST 初态形态）+ 装完那次开机自证。
+  if ($rep.Vbios) { Info ('显卡 VBIOS : ' + $rep.Vbios + '  （仅信息记录：本包不按 VBIOS 版本判定能否解锁）') }
   # 2026-10-11：批次预检（只读）。认出锁死批次 → 明确提示 + 客户选择；强制安装连 EFI 一起装，但告知 43 风险与自救办法
   $bv = Get-BatchVerdict
   if ($bv.Verdict -eq 'unlockable') {

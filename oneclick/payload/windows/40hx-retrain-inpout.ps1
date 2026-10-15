@@ -10,9 +10,11 @@
 #             it waited the full 120s and exited 12 on every boot. -GpuBdf/-RootBdf override (hex like 0x0200).
 $ErrorActionPreference='Continue'
 # 工具版本号：必须在使用点之前定义（2026-10-01 修正：原先定义在文件后半段，banner 里的 ver= 一直是空的）
-$TOOL_VER = '20261014a'
+$TOOL_VER = '20261015a'
 # 2026-10-14：并入客户 Gen2 包 c 版（20261013c）的 Stage2 块（Link Disable 循环，锁态卡专用）+ PASS/FAIL
 #   判定改用最终实测 LNKSTA；上面这行版本号同时 bump 到 20261014a —— 已装过旧包的机器要跑一次
+# 20261015a：-BatchCheck 判据表补两条 POST 形态（0x44344040/0x7=可解锁侧；0x00400000/0x6=失败平台侧，判 unknown 不判 locked）。
+#   已装过旧包的机器要跑一次 一键解锁40HX.bat（版本门禁会拦旧工具）。
 #   一键修复Gen2.cmd 才会同步 C:\ProgramData\CMP40HXGen2\windows\ 那份副本（版本门禁，见 2026-10-13 DSH r4 必修 Q5）。
 # 2026-10-02（用户要求：解锁状态正常了就别再堆日志）：完整读数写 retrain-last.log —— **每次运行覆盖**，
 #   不再像老版那样每开机往 retrain-inpout.log 追加一份（那个文件只增不减，一个月长到 200+ KB）。
@@ -865,6 +867,9 @@ if($DumpFuse){
 # ---- 2026-10-11: 批次预检（安装器调用；只读，不写任何寄存器、不训练、不动驱动状态）----
 # 判定只看 POST 初态 SS0 形态（0x02020004=已知可解锁 / 0x10000010=已知可解锁(.06 Prod 1例实证 2026-10-12) / 0x20000010=已知锁死 / 0x88888888=本次已解锁），
 # 不做写入探测 —— 写入回读不能区分批次（可解锁的 .04 卡探测写同样不生效，解锁靠 booter）。
+# 2026-10-14 新增两条（C11 交叉换机实证）：0x44344040/0x7 = 可解锁侧；0x00400000/0x6 = 实测失败平台侧。
+#   ⚠ 失败侧那条**判 unknown 不判 locked**：同一张卡换到另一块主板就 UNLOCKED（WPR2 UP after 0ms → booter OK attempt 1），
+#   签名不足以给卡判死刑；locked 只留给「写入回读硬锁」的锁死批次（0x20000010）。
 if($BatchCheck){
   $fmt={param($v) if($v -eq $null){'READ_FAILED'}else{'0x'+$v.ToString('X8')}}
   $ss1v=MmioRead ([uint64]($bar+0x40966C)); $plmv=MmioRead ([uint64]($bar+0x409650))
@@ -875,6 +880,8 @@ if($BatchCheck){
   if($h0 -eq '0x88888888'){ $bc='unlockable' }
   elseif($h0 -eq '0x02020004'){ $bc='unlockable' }
   elseif($h0 -eq '0x10000010'){ $bc='unlockable' }   # 2026-10-12: Z370 客户机 .06 Prod 实证可解（1 例）
+  elseif($h0 -eq '0x44344040'){ $bc='unlockable' }  # 2026-10-14: 精粤 B660I（卡 210281206009679）实证可解 —— WPR2 UP after 0ms → booter OK attempt 1 → UNLOCKED
+  elseif($h0 -eq '0x00400000'){ $bc='unknown' }     # 2026-10-14: 铭瑄 H610ITX（同卡）实测失败的平台侧 —— FWSEC IMEM[0]=0xffffffff / WPR2 不上 / 两次 m0=0x89 / PLM closed；**不判 locked**（换板即成功）
   elseif($h0 -eq '0x20000010'){ $bc='locked' }
   W("  BATCH_SS0=" + (& $fmt $ss0) + " BATCH_SS1=" + (& $fmt $ss1v) + " BATCH_PLM=" + (& $fmt $plmv) + " BATCH_LC0=" + (& $fmt $lc0) + " BATCH_PM1=" + (& $fmt $pm1) + " BATCH_PLR=" + (& $fmt $plrv) + " BATCH_LNKCAP=" + $(if($glv -eq $null){'READ_FAILED'}else{'0x'+([uint32]$glv).ToString('X8')}))
   W("  BATCH_VERDICT=" + $bc)

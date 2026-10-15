@@ -181,20 +181,15 @@ set "OK4=2"
 goto :gen2info
 :gsp_done
 echo.
-rem 2026-10-11 新增：VBIOS 批次判别（Prod/Debug 签名链，三卡 VBIOS 对比实证：Prod 链拒签 EFI 注入 → 算力解不开）
+rem 2026-10-11 新增 / 2026-10-15 改口径：VBIOS 版本只作为信息打印，不再判「算力能不能解」
+rem   （依据：2026-10-14 交叉换机实证——同两张 .06 卡换板结局翻转，能解与否由平台/主板决定）
 rem   只读上面已落盘的 nvidia-smi -q 结果（%TMPG%），零硬件触碰、不计入结论项
 set "VBV="
 if exist "%TMPV%" del "%TMPV%" >nul 2>&1
 if exist "%TMPG%" powershell -NoProfile -Command "$q=[IO.File]::ReadAllText('%TMPG%');$m=[regex]::Match($q,'(?im)^\s*VBIOS Version\s*:\s*(\S+?)\s*$');if($m.Success){$m.Groups[1].Value}else{''}" > "%TMPV%" 2>nul
 if exist "%TMPV%" for /f "usebackq delims=" %%a in ("%TMPV%") do set "VBV=%%a"
-set "VBK=0"
-if "%VBV%"=="90.06.67.00.04" set "VBK=1"
-if "%VBV%"=="90.06.67.00.06" set "VBK=2"
-if "%VBK%"=="1" echo     [OK] VBIOS 批次 : %VBV% = Debug 签名链（算力+Gen2 都在可解范围）
-if "%VBK%"=="2" echo     [!!] VBIOS 批次 : %VBV% = 已知 Prod 签名链变体（固件拒签 EFI 注入，算力 2 例实证无解；.06 有多个变体，以安装器批次预检为准）
-if "%VBK%"=="2" echo            要算力需先刷 Debug 版 VBIOS（高风险，需专用刷机包）-- 找包作者；只要 Gen2 可忽略本条
-if not defined VBV echo     [--] VBIOS 批次 : 没能判定（nvidia-smi -q 没有 VBIOS 行?）-- 不影响下面的实测
-if defined VBV if "%VBK%"=="0" echo     [--] VBIOS 批次 : %VBV% = 未收录版本，以实测为准
+if defined VBV echo     [--] VBIOS 版本 : %VBV%（仅信息记录，本包不按版本判定能不能解；算力看下面实测行）
+if not defined VBV echo     [--] VBIOS 版本 : 没能读出（nvidia-smi -q 没有 VBIOS 行?）-- 与能不能解锁无关
 
 rem 2026-10-12（参考 Cyridd/cmpunlocker #4）：ReBAR/BAR1 读出 —— NVIDIA 控制面板对 40HX 不显示 ReBAR；
 rem 2026-10-14：本包已内置 ReBAR（一键解锁40HX.bat 选项 2 → ReBAR 版 EFI 设第一启动项），口径随之更新

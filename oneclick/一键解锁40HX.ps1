@@ -405,8 +405,8 @@ function Test-Health {
     $m = [regex]::Match($q, '(?s)BAR1 Memory Usage.*?Total\s*:\s*(\d+)\s*MiB')
     if ($m.Success) { $H.Bar1 = [int]$m.Groups[1].Value }
   }
-  if ($H.Vbios -match '^90\.06\.67\.00\.04') { $H.Batch = 'Debug 签名链（算力+Gen2 都在可解范围）' }
-  elseif ($H.Vbios) { $H.Batch = '非 Debug 变体（可能是 Prod：算力**因变体而异**，有实测无解的批次）' }
+  # 2026-10-15（用户定稿）：**不再按 VBIOS 版本判定能不能解** —— 2026-10-14 交叉换机实证（案例库 C11）已推翻：
+  #   同两张 .06 AS03 卡换到精粤 B660I 全解锁、换到铭瑄 H610ITX 全失败；同镜像不同命运。版本号只当信息记录。
   # 2026-10-14（用户要求：先判断客户机配置与设置再推荐）：Above 4G Decoding 是 ReBAR 的前提 —— 这里做一次**免驱动只读**探测：
   #   取这块卡在系统里被分配的 MMIO 窗口（CIM：Win32_PnPEntity ⇄ CIM_MemoryMappedIO）。
   #   · 存在 ≥ 4 GiB 的窗口 ⇒ 固件已经在用 64 位窗口 ⇒ Above 4G Decoding 生效过的**强证据**（可以推荐带 ReBAR 的选项 2）
@@ -527,7 +527,7 @@ function Show-Health {
   Ln ('  固件类型: ' + $(if ($H.FwType -eq 'UEFI') { '[OK] UEFI' } else { '[注意] ' + $H.FwType + '（本方案要求 UEFI）' }))
   Ln ('  主线前提体检: ' + $(if ($H.MainCheck.Code -eq 0) { '[OK] 通过' } elseif ($H.MainCheck.Code -eq -1) { $(if ($DryRun) { '[注意] 未执行（DryRun）' } else { '[失败] 没执行（找不到工具或进程起不来）' }) } else { '[注意] 退出码 ' + $H.MainCheck.Code + '（见 ' + $H.MainCheck.Log + '）' }))
   Ln ('  40HX 设备: ' + $(if ($H.DevOk) { '[OK] 在位，状态码 ' + $H.DevCode } else { '[失败] 没找到' }))
-  Ln ('  VBIOS: ' + $H.Vbios + ' → ' + $(if ($H.Batch -like 'Debug*') { '[OK] ' } else { '[注意] ' }) + $H.Batch)
+  Ln ('  VBIOS: ' + $(if ($H.Vbios) { $H.Vbios } else { '读不到' }) + '  （仅记录用：本包**不按 VBIOS 版本**判定能不能解）')
   Ln ('  BAR1（ReBAR 现状）: ' + $(if ($H.Bar1 -gt 0) { $H.Bar1.ToString() + ' MiB' } else { '读不到' }))
   Ln ('  Above 4G Decoding: ' + $(if ($H.Above4G -eq 'yes') { '[OK] 有证据（这块卡在 4G 以上有 MMIO 窗口 ' + $H.MmioWin + '）' } elseif ($H.Above4G -eq 'no') { '[注意] 无证据（只看到 4G 以下窗口 ' + $H.MmioWin + '）→ ReBAR 前提很可能没开' } else { '[注意] 读不到（CIM 查询失败）→ 按未知处理' }))
   Ln ('  Secure Boot: ' + $H.Sb + $(if ($H.Sb -match '^True') { '  ← 主线把它当硬门槛；选 2 需先关掉（或 -Force 知情强制）' } else { '' }))
@@ -541,27 +541,12 @@ function Show-Health {
 
 function Get-Advice {
   param($H)
-  # 2026-10-14（用户定稿的判据）：VBIOS 决定"算力能不能解"，Above 4G 决定"要不要带 ReBAR"；
-  #   下面是按优先级排的矩阵，命中即给推荐项；**只影响"回车默认选哪个"**，菜单永远列全部 6 项。
-  #   .04（Debug 链）= 算力可解 / .06 及未收录 = 算力可能有批次解不了（也见过 .06 解开的先例）
+  # 2026-10-15（用户定稿）：**不再按 VBIOS 版本判定** —— 2026-10-14 交叉换机实证（C11）表明能解与否由平台/主板决定，
+  #   版本号（.04/.06）已被反例推翻（同镜像不同命运、同卡换板结局翻转）。现在的判据只有三条：
+  #   顺序：ReBAR 现状（BAR1=8192）→ 设备状态码（≠0 推 r）→ 阻塞项（推 r）→ Above 4G 有没有证据（有=2 / 无或未知=1）。
+  #   卡坏或环境不达标时先让人去修（r），Above 4G 只决定"要不要带 ReBAR"。**只影响"回车默认选哪个"**，菜单永远列全部 6 项。
   if ($H.Bar1 -eq 8192) {
     return @{ Recommended = '2'; Why = '本机 ReBAR 现在就开着（BAR1=8192 MiB，设备窗口 ' + $H.MmioWin + '）→ 选 2 保持现状；选 1 会把启动项换回主线 EFI、ReBAR 会关掉。' }
-  }
-  if ($H.Batch -like 'Debug*') {
-    if ($H.Above4G -eq 'yes') {
-      return @{ Recommended = '2'; Why = 'VBIOS ' + $H.Vbios + ' = Debug 链（算力可解）+ 有 Above 4G 证据（设备在 4G 以上有 MMIO 窗口 ' + $H.MmioWin + '）→ 推荐算力 + Gen2 + ReBAR 一起开。' }
-    }
-    elseif ($H.Above4G -eq 'no') {
-      return @{ Recommended = '1'; Why = 'VBIOS ' + $H.Vbios + ' = Debug 链（算力可解）；但没看到 4G 以上的窗口（Above 4G Decoding 很可能没开）→ 先选 1（算力+Gen2）；想开 ReBAR 就先去 BIOS 打开 Above 4G 再回来选 2。' }
-    }
-    else {
-      return @{ Recommended = '1'; Why = 'VBIOS ' + $H.Vbios + ' = Debug 链（算力可解）；Above 4G 读不到（未知）→ 按保守推荐只开算力+Gen2；有把握就直接选 2（第一次开机会自证，失败会整体回滚）。' }
-    }
-  }
-  if ($H.Vbios) {
-    $rec = '3'; $why = 'VBIOS ' + $H.Vbios + ' 不是 Debug 变体：算力**可能有批次解不了**（也见过 .06 解开的先例）→ 先只解 Gen2（不动算力、不动 ESP 启动项）。想连算力和 ReBAR 一起试，直接选 1 或 2；要"锁死批次也照装"就选 f。'
-    if ($H.Above4G -eq 'yes') { $why += '（本机 Above 4G 有证据，ReBAR 是可试的；但算力这条仍是"试试看"）' }
-    return @{ Recommended = $rec; Why = $why }
   }
   if ($H.DevOk -and $H.DevCode -ne '0' -and $H.DevCode -ne '') {
     return @{ Recommended = 'r'; Why = '卡在设备管理器里有状态码 ' + $H.DevCode + '（43 = 驱动没起来）→ 先按上面提示修好（GSP / 完全关机再开机）再装，否则装完也看不到效果。' }
@@ -569,7 +554,13 @@ function Get-Advice {
   if ($H.Blockers.Count -gt 0) {
     return @{ Recommended = 'r'; Why = '体检有阻塞项（见上面红字）→ 先把它们处理干净（最常见是 Secure Boot 没关）再装；现在装大概率白跑一次。确认要硬试就选 1/2/f。' }
   }
-  return @{ Recommended = '1'; Why = '没发现阻塞项：算力 + Gen2 走已验证过的主线路径最稳。VBIOS 读不到时也按这个保守推荐。' }
+  if ($H.Above4G -eq 'yes') {
+    return @{ Recommended = '2'; Why = '有 Above 4G 证据（这块卡在 4G 以上有 MMIO 窗口 ' + $H.MmioWin + '）→ 推荐算力 + Gen2 + ReBAR 一起开（第一次开机会自证，失败会整体回滚）。' }
+  }
+  if ($H.Above4G -eq 'no') {
+    return @{ Recommended = '1'; Why = '没看到 4G 以上的窗口（Above 4G Decoding 很可能没开）→ 先选 1（算力+Gen2）；想开 ReBAR 就先去 BIOS 打开 Above 4G 再回来选 2。' }
+  }
+  return @{ Recommended = '1'; Why = 'Above 4G 读不到（未知）+ 没发现阻塞项 → 按保守推荐：算力 + Gen2（想连 ReBAR 一起试就直接选 2，第一次开机会自证，失败整体回滚）。' }
 }
 
 function Show-ReBarRisks {
@@ -763,9 +754,9 @@ if ($Choice -eq 'menu' -or $Choice -eq 'force') {
   else {
     Ln ''
     Ln '---- 要做什么？（直接回车 = 上面那个推荐项）----' 'Cyan'
-    Ln '  1  解锁算力 + Gen2                （主线路径；VBIOS .04 这类能解的板子选它）'
+    Ln '  1  解锁算力 + Gen2                （主线路径：算力 + Gen2，绝大多数机器选它）'
     Ln '  2  解锁算力 + Gen2 + ReBAR 8GiB   （选做；ReBAR 已开着的机器用这个保持）'
-    Ln '  3  只解锁 Gen2                    （算力被批次拒签时先只解 Gen2；不动算力/不动 ESP 启动项）'
+    Ln '  3  只解锁 Gen2                    （只想先要 Gen2 / 不想动算力和 ESP 启动项时选它）'
     Ln '  f  强行解锁算力                   （连锁死批次/没见过的批次也照装 —— 我们还没找到解不开的根因，留这条路）'
     Ln '  r  只体检（什么都不改）'
     Ln '  u  撤销 ReBAR 部署（切回主线 EFI、删 ReBAR 启动项与文件）'
@@ -788,7 +779,8 @@ if ($Choice -eq 'menu' -or $Choice -eq 'force') {
     Ln ''
     Ln '==== 强行解锁（你选了强制）====' 'Yellow'
     Ln '  · 连锁死批次 / 没见过的批次，本包都不再劝退，装完由这次开机自证。'
-    Ln '  · 我们还没找到「算力解不开」的根因（有 .06 解开的先例，也有整批拒签的），所以留这条路。'
+    Ln '  · 2026-10-14 交叉换机实证：同一张卡换一块主板就从「全失败」变「一次 attempt 就解锁」→ 解不开多半在平台/主板'
+    Ln '    （BIOS 三项 / BIOS 太老 / 64 位地址解码），不按 VBIOS 版本判卡；所以留这条路。'
     Ln '  · 风险：开机跑码阶段可能把卡留在异常态 → 设备管理器 代码 43；自救 = 双击 一键卸载.cmd，'
     Ln '    或进 BIOS 把 Windows Boot Manager 排回第一启动项（40HX 项不跑就没有 43，Windows 侧 Gen2 工具照常工作）。'
     Ln '  · 前提硬门槛（Secure Boot / BitLocker / MBR 盘）仍会拦 —— 那几项不处理，装了也不生效。'
